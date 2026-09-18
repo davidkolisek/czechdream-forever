@@ -1,3 +1,3 @@
-create table if not exists characters (id uuid primary key default gen_random_uuid(), name text not null, realm text, class text, level integer, updated_at timestamptz default now());
-create table if not exists events (id uuid primary key default gen_random_uuid(), character_id uuid references characters(id), type text not null, payload jsonb not null default '{}', occurred_at timestamptz default now());
+create table if not exists characters (id uuid primary key default gen_random_uuid(), name text not null, player text not null, realm text, class text, level integer not null default 0, deaths integer not null default 0, played_hours numeric not null default 0, updated_at timestamptz default now(), unique(name, player));
+create table if not exists events (id uuid primary key default gen_random_uuid(), external_id text unique not null, player text not null, type text not null, payload jsonb not null default '{}', occurred_at timestamptz default now());
 create index if not exists events_occurred_at_idx on events(occurred_at desc);

@@ -1,9 +1,6 @@
-import type { Config, Handler } from '@netlify/functions'
-type SyncPayload = { character?: Record<string, unknown>; stats?: Record<string, unknown>; events?: unknown[] }
+import type { Handler } from '@netlify/functions'
+import { database } from './db'
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'POST required' }) }
-  let payload: SyncPayload
-  try { payload = JSON.parse(event.body || '{}') } catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) } }
-  return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ok: true, acceptedEvents: payload.events?.length || 0, receivedAt: new Date().toISOString() }) }
+  try { const payload = JSON.parse(event.body || '{}'); if (database) { for (const item of payload.events || []) await database`insert into events (external_id, player, type, payload, occurred_at) values (${item.id || crypto.randomUUID()}, ${item.player || 'unknown'}, ${item.type || 'UNKNOWN'}, ${JSON.stringify(item.data || item)}, to_timestamp(${Number(item.at || Date.now()) / 1000})) on conflict (external_id) do nothing`; for (const character of payload.characters || []) await database`insert into characters (name, player, class, level, deaths, played_hours) values (${character.name}, ${character.owner || payload.player || 'unknown'}, ${character.class || 'Unknown'}, ${Number(character.level || 0)}, ${Number(character.deaths || 0)}, ${Number(character.played || 0) / 3600}) on conflict (name, player) do update set class=excluded.class, level=excluded.level, deaths=excluded.deaths, played_hours=excluded.played_hours, updated_at=now()` }; return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ok:true, stored:Boolean(database), acceptedEvents:payload.events?.length || 0 }) } } catch (error) { console.error(error); return { statusCode:400, body:JSON.stringify({ ok:false, error:'Invalid sync payload' }) } }
 }
-export const config: Config = { path: '/api/sync' }
