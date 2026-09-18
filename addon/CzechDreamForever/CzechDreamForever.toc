@@ -1,0 +1,12 @@
+## Interface: 30403
+## Title: CzechDream Forever
+## Notes: Zdieľaná guild kronika pre CzechDream crew
+## Author: CzechDream
+## Version: 0.1.0
+## SavedVariables: CzechDreamForeverDB
+Core.lua
+Storage.lua
+Events.lua
+Sync.lua
+Commands.lua
+UI.lua
