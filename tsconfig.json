@@ -1,1 +1,1 @@
-{"compilerOptions":{"target":"ES2020","module":"ESNext","moduleResolution":"Bundler","strict":true,"jsx":"preserve","skipLibCheck":true,"types":["vite/client"]},"include":["src","vite.config.ts","netlify"]}
+{"compilerOptions":{"target":"ES2020","module":"ESNext","moduleResolution":"Bundler","strict":true,"jsx":"preserve","skipLibCheck":true,"resolveJsonModule":true,"types":["vite/client"]},"include":["src","vite.config.ts","netlify"]}
