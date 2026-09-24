@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "test:advisor": "node scripts/advisor-matrix.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
