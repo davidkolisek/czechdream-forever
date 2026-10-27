@@ -1,12 +1,15 @@
-## Interface: 30403
-## Title: CzechDream Forever
-## Notes: Zdieľaná guild kronika pre CzechDream crew
+## Interface: 16001
+## AllowLoadGameType: camelot
+## Title: CzechDream Lite
+## Notes: Lightweight quality-of-life utilities for WoW Forever
 ## Author: CzechDream
-## Version: 0.1.0
-## SavedVariables: CzechDreamForeverDB
+## Version: 0.4.2
+## SavedVariables: CzechDreamLiteDB
 Core.lua
 Storage.lua
-Events.lua
-Sync.lua
-Commands.lua
+UnitFrames.lua
+QuestAutomation.lua
+Vendor.lua
+ErrorFilter.lua
 UI.lua
+Commands.lua

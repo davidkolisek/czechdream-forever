@@ -1,19 +1,20 @@
 # CzechDream Forever
 
-Vue 3 + TypeScript web dashboard, Netlify Functions API, database schema and a playable WoW addon V0.1.
+Vue 3 + TypeScript guild website and the CzechDream Lite quality-of-life addon for WoW Forever.
 
 ## WoW addon installation
 
-Copy the folder `addon/CzechDreamForever` into your WoW client's `Interface/AddOns/` directory. The folder must contain `CzechDreamForever.toc` directly.
+Download the current version from the website or copy `addon/CzechDreamForever` into the WoW client's `Interface/AddOns/` directory. The folder must contain `CzechDreamForever.toc` directly.
 
 In game:
 
-- `/forever` opens the CzechDream Forever panel.
-- `/forever hello` discovers other installed CzechDream Forever players in the guild.
-- `/forever crew The Boys` changes the crew name.
-- `/forever moment Palo zase spadol z útesu` adds a custom moment.
+- `/cd`, `/czechdream` or `/forever` opens the settings panel.
+- `/cd debug` prints addon diagnostics.
+- Hold Shift while talking to a quest NPC to temporarily disable quest automation.
 
-The addon stores data in `WTF/Account/.../SavedVariables/CzechDreamForever.lua` and synchronizes events through the guild addon channel. No backend or internet connection is required for V0.1.
+The addon stores its settings in `CzechDreamLiteDB`. It does not need the website, a backend or an internet connection.
+
+The public versioned release archive is stored in `public/downloads/` and is served directly by Netlify.
 
 ## Local development
 

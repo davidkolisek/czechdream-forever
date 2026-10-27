@@ -1,39 +1,71 @@
 local addon = CzechDreamForever
 
 local function defaults()
-  return { crew = { name = 'CzechDream' }, player = { name = '', inviteCode = '' }, characters = {}, events = {}, peers = {} }
+  return {
+    settings = {
+      classColoredFrames = true,
+      autoAccept = true,
+      autoTurnIn = true,
+      autoReward = true,
+      autoRepair = true,
+      autoSellJunk = false,
+      errorFilter = false,
+      filterAllErrors = false,
+      filterResourceErrors = true,
+      filterCooldownErrors = true,
+      filterRangeErrors = true,
+      filterInventoryErrors = false
+    },
+    minimap = {
+      hide = false,
+      angle = 45
+    }
+  }
 end
 
-function addon:InitStorage()
-  CzechDreamForeverDB = CzechDreamForeverDB or defaults()
-  local db = CzechDreamForeverDB
-  for key, value in pairs(defaults()) do if db[key] == nil then db[key] = value end end
-  db.player.name = db.player.name ~= '' and db.player.name or UnitName('player')
-  self.db = db
+local function mergeMissing(target, source)
+  for key, value in pairs(source) do
+    if target[key] == nil then
+      if type(value) == 'table' then
+        target[key] = {}
+        mergeMissing(target[key], value)
+      else
+        target[key] = value
+      end
+    elseif type(value) == 'table' and type(target[key]) == 'table' then
+      mergeMissing(target[key], value)
+    end
+  end
 end
 
-function addon:CurrentCharacter()
-  local name, realm = UnitName('player'), GetRealmName()
-  local key = name .. '-' .. (realm or '')
-  local character = self.db.characters[key] or { name = name, realm = realm, events = {}, deaths = 0, pvpKills = 0, level = 1, played = 0 }
-  character.level = UnitLevel('player') or character.level
-  character.class = select(2, UnitClass('player')) or character.class
-  self.db.characters[key] = character
-  return character, key
+function addon:InitDB()
+  if type(CzechDreamLiteDB) ~= 'table' then CzechDreamLiteDB = {} end
+  if type(CzechDreamLiteDB.settings) ~= 'table' then CzechDreamLiteDB.settings = {} end
+  if type(CzechDreamLiteDB.minimap) ~= 'table' then CzechDreamLiteDB.minimap = {} end
+  mergeMissing(CzechDreamLiteDB, defaults())
+
+  -- The original build placed the button well inside the minimap. Move only
+  -- that untouched default once; a position chosen by the player is kept.
+  if (CzechDreamLiteDB.layoutVersion or 1) < 2 then
+    if CzechDreamLiteDB.minimap.angle == 225 then
+      CzechDreamLiteDB.minimap.angle = 45
+    end
+    CzechDreamLiteDB.layoutVersion = 2
+  end
+
+  self.db = CzechDreamLiteDB
 end
 
-function addon:AddEvent(kind, data)
-  local character, key = self:CurrentCharacter()
-  local event = { id = self:Now() .. '-' .. math.random(1000, 9999), type = kind, character = key, player = self.db.player.name, at = self:Now(), data = data or {} }
-  table.insert(self.db.events, event)
-  table.insert(character.events, event.id)
-  while #self.db.events > self.maxEvents do table.remove(self.db.events, 1) end
-  if kind == 'DEATH' then character.deaths = (character.deaths or 0) + 1 end
-  if kind == 'PVP_KILL' then character.pvpKills = (character.pvpKills or 0) + 1 end
-  return event
-end
-
-function addon:FindEvent(id)
-  for _, event in ipairs(self.db.events) do if event.id == id then return true end end
-  return false
-end
+local saveFrame = CreateFrame('Frame')
+saveFrame:RegisterEvent('ADDON_LOADED')
+saveFrame:RegisterEvent('PLAYER_LOGOUT')
+saveFrame:SetScript('OnEvent', function(self, event, loadedAddon)
+  if event == 'ADDON_LOADED' and loadedAddon == addon.folderName then
+    -- SavedVariables are loaded AFTER the files in the TOC. Binding earlier
+    -- leaves addon.db pointing at defaults instead of the restored table.
+    addon:InitDB()
+    self:UnregisterEvent('ADDON_LOADED')
+  elseif event == 'PLAYER_LOGOUT' then
+    addon:SaveDB()
+  end
+end)

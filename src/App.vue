@@ -1,172 +1,1996 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { router } from './router'
-import crew from '../crew.json'
-type Character={name:string;owner:string;class:string;level:number;color?:string;status?:string}
-type Dashboard={activePlayers:number;totalLevels:number;deaths:number;playedHours:number;characters:Character[];events:{title:string;detail:string;type?:string}[]}
-const route=ref(router.currentRoute.value.path==='/'?'overview':router.currentRoute.value.path.slice(1)), menu=ref(false), connected=ref(false), loading=ref(true), now=ref(Date.now()), showForm=ref(false), submitted=ref(false)
-const crewMembers=ref<Array<{name:string;character:string;class:string;faction:string;roles?:string}>>(crew)
-const sheetCsv='https://docs.google.com/spreadsheets/d/1SZIHizrbutMwKg25SF9vGVLSEMo_NIogMF4ZiJ20NcY/export?format=csv&gid=186545892'
-const classIcons:Record<string,string>={Druid:'class_druid',Hunter:'class_hunter',Mage:'class_mage',Paladin:'class_paladin',Priest:'class_priest',Rogue:'class_rogue',Shaman:'class_shaman',Warlock:'class_warlock',Warrior:'class_warrior'}
-function classIcon(className:string){const key=className.trim();return classIcons[key]?`https://wow.zamimg.com/images/wow/icons/medium/${classIcons[key]}.jpg`:''}
-function factionIcon(faction:string){return faction==='Horde'?'https://wow.zamimg.com/images/wow/icons/tiny/side_horde.gif':faction==='Alliance'?'https://wow.zamimg.com/images/wow/icons/tiny/side_alliance.gif':''}
-function parseCsv(csv:string){const rows=csv.trim().split(/\r?\n/).map(row=>row.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/).map(cell=>cell.replace(/^\"|\"$/g,'').replace(/\"\"/g,'\"')));const headers=rows.shift()?.map(h=>h.trim())||[];return rows.filter(row=>row.some(Boolean)).map(row=>{const item=Object.fromEntries(headers.map((header,index)=>[header,row[index]||'']));return {name:item['Your name / nickname']||'',character:'',class:item['Which class do you want to play?']||'',faction:item['Faction']||'',roles:item['Which roles are you interested in?']||''}}).filter(item=>item.name)}
-const factions={Horde:['Orc','Undead','Tauren','Troll','Skyborne'],Alliance:['Human','Dwarf','Night Elf','Gnome','Skyborne']}
-const combinations:Record<string,string[]>={Druid:['Night Elf','Tauren','Skyborne'],Hunter:['Human','Dwarf','Night Elf','Orc','Tauren','Troll','Skyborne'],Mage:['Human','Gnome','Undead','Troll','Skyborne'],Paladin:['Human','Dwarf','Undead'],Priest:['Human','Dwarf','Night Elf','Gnome','Undead','Troll'],Rogue:['Human','Dwarf','Night Elf','Gnome','Orc','Undead','Troll','Skyborne'],Shaman:['Dwarf','Orc','Tauren','Troll','Skyborne'],Warlock:['Human','Gnome','Orc','Undead','Troll'],Warrior:['Human','Dwarf','Night Elf','Gnome','Orc','Undead','Tauren','Troll','Skyborne']}
-const form=reactive({name:'',faction:'',race:'',character:'',class:'',characters:[] as {character:string;race:string;class:string}[],launch:'yes',note:''})
-const signupUrl='https://docs.google.com/forms/d/e/1FAIpQLSfbhURjHavL3GG5T9xTN_cvn3ZEy5uBthUCJQM5YTNDLmPbdg/viewform'
-function openSignup(){showForm.value=true}
-async function refreshCrew(){try{const response=await fetch(`${sheetCsv}&t=${Date.now()}`);if(response.ok){const members=parseCsv(await response.text());crewMembers.value=members as typeof crewMembers.value}}catch{/* keep current roster on refresh failure */}}
-async function closeSignup(){showForm.value=false;await refreshCrew()}
-const factionRaces=computed(()=>factions[form.faction as 'Horde'|'Alliance'] || [])
-const availableClasses=computed(()=>Object.keys(combinations).filter(name=>form.race && combinations[name].includes(form.race)))
-const allClasses=Object.keys(classIcons)
-const allRoles=['DPS','Heal','Tank']
-const foreverFacts=[
-  {name:'Alchemy',icon:'trade_alchemy',bonus:'Longer duration and stronger effects from elixirs and flasks.',detail:'A strong all-round choice for players who want consistent consumable value in PvP and everyday play.'},
-  {name:'Enchanting',icon:'inv_misc_scroll_02',bonus:'Enchant your own rings with Spell Power, Attack Power or Stamina.',detail:'Turns your rings into another source of permanent character power.'},
-  {name:'Engineering',icon:'inv_misc_gear_01',bonus:'No additional stat bonus from the profession passive.',detail:'Engineering is about utility, gadgets and clever tools rather than a direct stat increase.'},
-  {name:'Leatherworking',icon:'inv_misc_armorkit_17',bonus:'Temporary bracer armor kits with Spell Power, Attack Power or Stamina.',detail:'Useful preparation for players who want an extra temporary edge before a fight.'},
-  {name:'Tailoring',icon:'inv_fabric_silk_02',bonus:'Cloak embroideries that grant Spell Power, Attack Power or Stamina.',detail:'A useful option for cloth wearers and anyone planning around spell or attack power.'},
-  {name:'Herbalism',icon:'trade_herbalism',bonus:'Resistance to all schools of magic as skill increases.',detail:'Particularly interesting for PvP players who expect to fight a lot of casters.'},
-  {name:'Skinning',icon:'inv_misc_pelt_wolf_01',bonus:'5% increased total health.',detail:'Simple and effective survivability for every character, regardless of class.'},
-  {name:'Mining',icon:'inv_pick_02',bonus:'5% increased damage to Beasts and Dragonkin.',detail:'A situational damage bonus that becomes valuable in the right encounters.'}
-]
-const fieldNotes=[
-  {route:'facts',category:'FOREVER UPDATE',title:'WORLD OF WARCRAFT: FOREVER OVERVIEW',text:'New zones, races, dungeons, professions, PvP and everything worth knowing before launch.',icon:'inv_misc_map_01'},
-  {route:'professions',category:'PROFESSION NOTES',title:'PROFESSIONS',text:'Which professions add stats, utility and useful bonuses in Forever?',icon:'trade_alchemy'},
-  {route:'article',category:'WORLD SYSTEMS',title:'CAMPING IN THE OPEN WORLD',text:'Build a campsite almost anywhere and let the crew turn tradeskills into shared buffs.',icon:'inv_misc_campfire',body:'Forever introduces campsites that can be created almost anywhere in the open world. Other players can use their tradeskills at the camp to grant group-wide profession buffs. It is a small system designed to make the world feel more social.'},
-  {route:'article',category:'LEGACY SYSTEM',title:'LEVEL 60 IS NOT THE END',text:'Legacy Points turn exploration, PvP, professions and dungeons into account-wide progress.',icon:'achievement_general',body:'The Legacy system rewards challenges across the whole game: exploring, leveling classes, increasing tradeskills, earning PvP ranks, maximizing reputations and completing dungeons and raids. Points unlock non-combat perks and collection rewards for your account.'},
-  {route:'article',category:'PVP NOTES',title:'DARKSPEAR ISLANDS',text:'A new 15v15 battleground built around interactive capture points.',icon:'achievement_bg_winwsg',body:'Darkspear Islands is a new 15v15 battleground with interactive objectives. Forever will also receive an updated seasonal PvP system, making this one of the most interesting features for the CzechDream crew.'},
-  {route:'article',category:'ECONOMY',title:'NO GDKP',text:'Blizzard is taking a strict approach to the Forever economy.',icon:'inv_misc_coin_01',body:'GDKP will not be allowed in Forever. Blizzard has said that the game economy is being taken seriously, keeping the focus on playing together rather than turning raid loot into an auction.'},
-  {route:'racials',category:'RACE NOTES',title:'RACIAL PASSIVES',text:'Compare what every race brings before you lock in your character.',icon:'achievement_character_human_female'},
-  {route:'advisor',category:'CHARACTER BUILDER',title:'FIND YOUR FOREVER MAIN',text:'Answer a few questions and get a class, race and profession recommendation.',icon:'inv_misc_book_07'}
-]
-const advisor=reactive({faction:'',focus:'',role:'',playstyle:'',difficulty:'',experience:'',combat:'',independence:'',social:'',complexity:'',priorities:[] as string[]})
-const advisorSignals={
-  'Stealth & burst':['Rogue'], 'Mobile & ranged':['Hunter','Druid'], 'Simple & durable':['Warrior','Paladin'], 'Support & utility':['Shaman','Paladin','Priest','Druid'],
-  'Pet & solo play':['Hunter','Warlock'], 'Demons & dark magic':['Warlock'], 'Totems & hybrid utility':['Shaman'], 'Shapeshifting & flexibility':['Druid'], 'Heavy armour & protection':['Paladin','Warrior'],
-  'Damage over time & pressure':['Warlock','Priest'], 'Burst damage':['Rogue','Mage','Hunter','Warrior'], 'Control & disruption':['Mage','Rogue','Warlock','Priest'], 'Healing & support':['Priest','Shaman','Paladin','Druid']
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { router } from "./router";
+import crew from "../crew.json";
+type Character = {
+  name: string;
+  owner: string;
+  class: string;
+  level: number;
+  color?: string;
+  status?: string;
+};
+type Dashboard = {
+  activePlayers: number;
+  totalLevels: number;
+  deaths: number;
+  playedHours: number;
+  characters: Character[];
+  events: { title: string; detail: string; type?: string }[];
+};
+const route = ref(
+    router.currentRoute.value.path === "/"
+      ? "overview"
+      : router.currentRoute.value.path.slice(1),
+  ),
+  menu = ref(false),
+  connected = ref(false),
+  loading = ref(true),
+  now = ref(Date.now()),
+  showForm = ref(false),
+  submitted = ref(false);
+const crewMembers =
+  ref<
+    Array<{
+      name: string;
+      character: string;
+      class: string;
+      faction: string;
+      roles?: string;
+    }>
+  >(crew);
+const sheetCsv =
+  "https://docs.google.com/spreadsheets/d/1SZIHizrbutMwKg25SF9vGVLSEMo_NIogMF4ZiJ20NcY/export?format=csv&gid=186545892";
+const addonVersion = "0.4.2";
+const addonDownload = `/downloads/CzechDream-Lite-v${addonVersion}.zip`;
+const classIcons: Record<string, string> = {
+  Druid: "class_druid",
+  Hunter: "class_hunter",
+  Mage: "class_mage",
+  Paladin: "class_paladin",
+  Priest: "class_priest",
+  Rogue: "class_rogue",
+  Shaman: "class_shaman",
+  Warlock: "class_warlock",
+  Warrior: "class_warrior",
+};
+function classIcon(className: string) {
+  const key = className.trim();
+  return classIcons[key]
+    ? `https://wow.zamimg.com/images/wow/icons/medium/${classIcons[key]}.jpg`
+    : "";
 }
-const advisorStep=ref(0)
-const advisorComplete=computed(()=>Boolean(advisor.faction&&advisor.focus&&advisor.role&&advisor.playstyle&&advisor.experience&&advisor.combat&&advisor.independence&&advisor.social&&advisor.complexity&&advisor.priorities.length))
-function advisorNext(){if(advisorStep.value<9)advisorStep.value++}
-function advisorBack(){if(advisorStep.value>0)advisorStep.value--}
-function resetAdvisor(){advisor.faction='';advisor.focus='';advisor.role='';advisor.playstyle='';advisor.difficulty='';advisor.experience='';advisor.combat='';advisor.independence='';advisor.social='';advisor.complexity='';advisor.priorities=[];advisorStep.value=0}
-const classProfiles:Record<string,{roles:string[];tags:string[];reason:string;watch:string}>= {
-  Druid:{roles:['Tank','Healer','Melee DPS','Ranged DPS'],tags:['flexible','support','mobile'],reason:'Druid is the widest toolbox in Forever: tank, heal, melee or ranged without rerolling.',watch:'You trade some simplicity for shapeshifting, forms and many ways to solve a fight.'},
-  Hunter:{roles:['Melee DPS','Ranged DPS'],tags:['solo','pet','mobile','utility'],reason:'Hunter fits players who want reliable ranged pressure, mobility, pets and strong solo play.',watch:'You are choosing damage and utility rather than a tank or healer slot.'},
-  Mage:{roles:['Ranged DPS'],tags:['ranged','control','utility'],reason:'Mage is the pure ranged controller: burst, AoE, crowd control, food, water and portals.',watch:'There is no tank or healer fallback; positioning and control are your defence.'},
-  Paladin:{roles:['Tank','Healer','Melee DPS'],tags:['flexible','support','durable'],reason:'Paladin gives you heavy armour, Holy support and three useful group roles.',watch:'The class rewards knowing when to protect, heal and spend your cooldowns.'},
-  Priest:{roles:['Healer','Ranged DPS'],tags:['healing','support','ranged','control'],reason:'Priest is built around powerful healing, shields and Shadow ranged pressure.',watch:'You can heal or deal ranged damage, but you are not a tank or melee class.'},
-  Rogue:{roles:['Melee DPS'],tags:['stealth','pvp','control','burst'],reason:'Rogue is the tactical PvP specialist: stealth, poisons, control and explosive windows.',watch:'It is a focused melee DPS choice with a higher skill ceiling and no group-heal role.'},
-  Shaman:{roles:['Healer','Melee DPS','Ranged DPS'],tags:['hybrid','totems','support','pvp'],reason:'Shaman combines ranged and melee pressure, healing and totem utility in one character.',watch:'Forever currently does not give Shaman a dedicated tank path.'},
-  Warlock:{roles:['Ranged DPS'],tags:['ranged','demons','dots','control','solo'],reason:'Warlock brings demons, damage-over-time pressure, self-healing and control.',watch:'You are committing to ranged damage; the depth comes from managing pressure and your demon.'},
-  Warrior:{roles:['Tank','Melee DPS'],tags:['durable','weapons','direct','pvp'],reason:'Warrior is the direct weapon specialist: durable melee damage or shield tanking.',watch:'There is less natural self-healing and utility than on the hybrid classes.'}
+function factionIcon(faction: string) {
+  return faction === "Horde"
+    ? "https://wow.zamimg.com/images/wow/icons/tiny/side_horde.gif"
+    : faction === "Alliance"
+      ? "https://wow.zamimg.com/images/wow/icons/tiny/side_alliance.gif"
+      : "";
 }
-const advisorResult=computed(()=>{
-  const faction=advisor.faction==='Alliance'?'Alliance':'Horde'
-  const factionRaces=factions[faction]
+function parseCsv(csv: string) {
+  const rows = csv
+    .trim()
+    .split(/\r?\n/)
+    .map((row) =>
+      row
+        .split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/)
+        .map((cell) => cell.replace(/^\"|\"$/g, "").replace(/\"\"/g, '"')),
+    );
+  const headers = rows.shift()?.map((h) => h.trim()) || [];
+  return rows
+    .filter((row) => row.some(Boolean))
+    .map((row) => {
+      const item = Object.fromEntries(
+        headers.map((header, index) => [header, row[index] || ""]),
+      );
+      return {
+        name: item["Your name / nickname"] || "",
+        character: "",
+        class: item["Which class do you want to play?"] || "",
+        faction: item["Faction"] || "",
+        roles: item["Which roles are you interested in?"] || "",
+      };
+    })
+    .filter((item) => item.name);
+}
+const factions = {
+  Horde: ["Orc", "Undead", "Tauren", "Troll", "Skyborne"],
+  Alliance: ["Human", "Dwarf", "Night Elf", "Gnome", "Skyborne"],
+};
+const combinations: Record<string, string[]> = {
+  Druid: ["Night Elf", "Tauren", "Skyborne"],
+  Hunter: ["Human", "Dwarf", "Night Elf", "Orc", "Tauren", "Troll", "Skyborne"],
+  Mage: ["Human", "Gnome", "Undead", "Troll", "Skyborne"],
+  Paladin: ["Human", "Dwarf", "Undead"],
+  Priest: ["Human", "Dwarf", "Night Elf", "Gnome", "Undead", "Troll"],
+  Rogue: [
+    "Human",
+    "Dwarf",
+    "Night Elf",
+    "Gnome",
+    "Orc",
+    "Undead",
+    "Troll",
+    "Skyborne",
+  ],
+  Shaman: ["Dwarf", "Orc", "Tauren", "Troll", "Skyborne"],
+  Warlock: ["Human", "Gnome", "Orc", "Undead", "Troll"],
+  Warrior: [
+    "Human",
+    "Dwarf",
+    "Night Elf",
+    "Gnome",
+    "Orc",
+    "Undead",
+    "Tauren",
+    "Troll",
+    "Skyborne",
+  ],
+};
+const form = reactive({
+  name: "",
+  faction: "",
+  race: "",
+  character: "",
+  class: "",
+  characters: [] as { character: string; race: string; class: string }[],
+  launch: "yes",
+  note: "",
+});
+const signupUrl =
+  "https://docs.google.com/forms/d/e/1FAIpQLSfbhURjHavL3GG5T9xTN_cvn3ZEy5uBthUCJQM5YTNDLmPbdg/viewform";
+function openSignup() {
+  showForm.value = true;
+}
+async function refreshCrew() {
+  try {
+    const response = await fetch(`${sheetCsv}&t=${Date.now()}`);
+    if (response.ok) {
+      const members = parseCsv(await response.text());
+      crewMembers.value = members as typeof crewMembers.value;
+    }
+  } catch {
+    /* keep current roster on refresh failure */
+  }
+}
+async function closeSignup() {
+  showForm.value = false;
+  await refreshCrew();
+}
+const factionRaces = computed(
+  () => factions[form.faction as "Horde" | "Alliance"] || [],
+);
+const availableClasses = computed(() =>
+  Object.keys(combinations).filter(
+    (name) => form.race && combinations[name].includes(form.race),
+  ),
+);
+const allClasses = Object.keys(classIcons);
+const allRoles = ["DPS", "Heal", "Tank"];
+const foreverFacts = [
+  {
+    name: "Alchemy",
+    icon: "trade_alchemy",
+    bonus: "Longer duration and stronger effects from elixirs and flasks.",
+    detail:
+      "A strong all-round choice for players who want consistent consumable value in PvP and everyday play.",
+  },
+  {
+    name: "Enchanting",
+    icon: "inv_misc_scroll_02",
+    bonus: "Enchant your own rings with Spell Power, Attack Power or Stamina.",
+    detail:
+      "Turns your rings into another source of permanent character power.",
+  },
+  {
+    name: "Engineering",
+    icon: "inv_misc_gear_01",
+    bonus: "No additional stat bonus from the profession passive.",
+    detail:
+      "Engineering is about utility, gadgets and clever tools rather than a direct stat increase.",
+  },
+  {
+    name: "Leatherworking",
+    icon: "inv_misc_armorkit_17",
+    bonus:
+      "Temporary bracer armor kits with Spell Power, Attack Power or Stamina.",
+    detail:
+      "Useful preparation for players who want an extra temporary edge before a fight.",
+  },
+  {
+    name: "Tailoring",
+    icon: "inv_fabric_silk_02",
+    bonus:
+      "Cloak embroideries that grant Spell Power, Attack Power or Stamina.",
+    detail:
+      "A useful option for cloth wearers and anyone planning around spell or attack power.",
+  },
+  {
+    name: "Herbalism",
+    icon: "trade_herbalism",
+    bonus: "Resistance to all schools of magic as skill increases.",
+    detail:
+      "Particularly interesting for PvP players who expect to fight a lot of casters.",
+  },
+  {
+    name: "Skinning",
+    icon: "inv_misc_pelt_wolf_01",
+    bonus: "5% increased total health.",
+    detail:
+      "Simple and effective survivability for every character, regardless of class.",
+  },
+  {
+    name: "Mining",
+    icon: "inv_pick_02",
+    bonus: "5% increased damage to Beasts and Dragonkin.",
+    detail:
+      "A situational damage bonus that becomes valuable in the right encounters.",
+  },
+];
+const fieldNotes = [
+  {
+    route: "facts",
+    category: "FOREVER UPDATE",
+    title: "WORLD OF WARCRAFT: FOREVER OVERVIEW",
+    text: "New zones, races, dungeons, professions, PvP and everything worth knowing before launch.",
+    icon: "inv_misc_map_01",
+  },
+  {
+    route: "professions",
+    category: "PROFESSION NOTES",
+    title: "PROFESSIONS",
+    text: "Which professions add stats, utility and useful bonuses in Forever?",
+    icon: "trade_alchemy",
+  },
+  {
+    route: "article",
+    category: "WORLD SYSTEMS",
+    title: "CAMPING IN THE OPEN WORLD",
+    text: "Build a campsite almost anywhere and let the crew turn tradeskills into shared buffs.",
+    icon: "inv_misc_campfire",
+    body: "Forever introduces campsites that can be created almost anywhere in the open world. Other players can use their tradeskills at the camp to grant group-wide profession buffs. It is a small system designed to make the world feel more social.",
+  },
+  {
+    route: "article",
+    category: "LEGACY SYSTEM",
+    title: "LEVEL 60 IS NOT THE END",
+    text: "Legacy Points turn exploration, PvP, professions and dungeons into account-wide progress.",
+    icon: "achievement_general",
+    body: "The Legacy system rewards challenges across the whole game: exploring, leveling classes, increasing tradeskills, earning PvP ranks, maximizing reputations and completing dungeons and raids. Points unlock non-combat perks and collection rewards for your account.",
+  },
+  {
+    route: "article",
+    category: "PVP NOTES",
+    title: "DARKSPEAR ISLANDS",
+    text: "A new 15v15 battleground built around interactive capture points.",
+    icon: "achievement_bg_winwsg",
+    body: "Darkspear Islands is a new 15v15 battleground with interactive objectives. Forever will also receive an updated seasonal PvP system, making this one of the most interesting features for the CzechDream crew.",
+  },
+  {
+    route: "article",
+    category: "ECONOMY",
+    title: "NO GDKP",
+    text: "Blizzard is taking a strict approach to the Forever economy.",
+    icon: "inv_misc_coin_01",
+    body: "GDKP will not be allowed in Forever. Blizzard has said that the game economy is being taken seriously, keeping the focus on playing together rather than turning raid loot into an auction.",
+  },
+  {
+    route: "racials",
+    category: "RACE NOTES",
+    title: "RACIAL PASSIVES",
+    text: "Compare what every race brings before you lock in your character.",
+    icon: "achievement_character_human_female",
+  },
+  {
+    route: "advisor",
+    category: "CHARACTER BUILDER",
+    title: "FIND YOUR FOREVER MAIN",
+    text: "Answer a few questions and get a class, race and profession recommendation.",
+    icon: "inv_misc_book_07",
+  },
+];
+const advisor = reactive({
+  faction: "",
+  focus: "",
+  role: "",
+  playstyle: "",
+  difficulty: "",
+  experience: "",
+  combat: "",
+  independence: "",
+  social: "",
+  complexity: "",
+  priorities: [] as string[],
+});
+const advisorSignals = {
+  "Stealth & burst": ["Rogue"],
+  "Mobile & ranged": ["Hunter", "Druid"],
+  "Simple & durable": ["Warrior", "Paladin"],
+  "Support & utility": ["Shaman", "Paladin", "Priest", "Druid"],
+  "Pet & solo play": ["Hunter", "Warlock"],
+  "Demons & dark magic": ["Warlock"],
+  "Totems & hybrid utility": ["Shaman"],
+  "Shapeshifting & flexibility": ["Druid"],
+  "Heavy armour & protection": ["Paladin", "Warrior"],
+  "Damage over time & pressure": ["Warlock", "Priest"],
+  "Burst damage": ["Rogue", "Mage", "Hunter", "Warrior"],
+  "Control & disruption": ["Mage", "Rogue", "Warlock", "Priest"],
+  "Healing & support": ["Priest", "Shaman", "Paladin", "Druid"],
+};
+const advisorStep = ref(0);
+const advisorComplete = computed(() =>
+  Boolean(
+    advisor.faction &&
+      advisor.focus &&
+      advisor.role &&
+      advisor.playstyle &&
+      advisor.experience &&
+      advisor.combat &&
+      advisor.independence &&
+      advisor.social &&
+      advisor.complexity &&
+      advisor.priorities.length,
+  ),
+);
+function advisorNext() {
+  if (advisorStep.value < 9) advisorStep.value++;
+}
+function advisorBack() {
+  if (advisorStep.value > 0) advisorStep.value--;
+}
+function resetAdvisor() {
+  advisor.faction = "";
+  advisor.focus = "";
+  advisor.role = "";
+  advisor.playstyle = "";
+  advisor.difficulty = "";
+  advisor.experience = "";
+  advisor.combat = "";
+  advisor.independence = "";
+  advisor.social = "";
+  advisor.complexity = "";
+  advisor.priorities = [];
+  advisorStep.value = 0;
+}
+const classProfiles: Record<
+  string,
+  { roles: string[]; tags: string[]; reason: string; watch: string }
+> = {
+  Druid: {
+    roles: ["Tank", "Healer", "Melee DPS", "Ranged DPS"],
+    tags: ["flexible", "support", "mobile"],
+    reason:
+      "Druid is the widest toolbox in Forever: tank, heal, melee or ranged without rerolling.",
+    watch:
+      "You trade some simplicity for shapeshifting, forms and many ways to solve a fight.",
+  },
+  Hunter: {
+    roles: ["Melee DPS", "Ranged DPS"],
+    tags: ["solo", "pet", "mobile", "utility"],
+    reason:
+      "Hunter fits players who want reliable ranged pressure, mobility, pets and strong solo play.",
+    watch:
+      "You are choosing damage and utility rather than a tank or healer slot.",
+  },
+  Mage: {
+    roles: ["Ranged DPS"],
+    tags: ["ranged", "control", "utility"],
+    reason:
+      "Mage is the pure ranged controller: burst, AoE, crowd control, food, water and portals.",
+    watch:
+      "There is no tank or healer fallback; positioning and control are your defence.",
+  },
+  Paladin: {
+    roles: ["Tank", "Healer", "Melee DPS"],
+    tags: ["flexible", "support", "durable"],
+    reason:
+      "Paladin gives you heavy armour, Holy support and three useful group roles.",
+    watch:
+      "The class rewards knowing when to protect, heal and spend your cooldowns.",
+  },
+  Priest: {
+    roles: ["Healer", "Ranged DPS"],
+    tags: ["healing", "support", "ranged", "control"],
+    reason:
+      "Priest is built around powerful healing, shields and Shadow ranged pressure.",
+    watch:
+      "You can heal or deal ranged damage, but you are not a tank or melee class.",
+  },
+  Rogue: {
+    roles: ["Melee DPS"],
+    tags: ["stealth", "pvp", "control", "burst"],
+    reason:
+      "Rogue is the tactical PvP specialist: stealth, poisons, control and explosive windows.",
+    watch:
+      "It is a focused melee DPS choice with a higher skill ceiling and no group-heal role.",
+  },
+  Shaman: {
+    roles: ["Healer", "Melee DPS", "Ranged DPS"],
+    tags: ["hybrid", "totems", "support", "pvp"],
+    reason:
+      "Shaman combines ranged and melee pressure, healing and totem utility in one character.",
+    watch: "Forever currently does not give Shaman a dedicated tank path.",
+  },
+  Warlock: {
+    roles: ["Ranged DPS"],
+    tags: ["ranged", "demons", "dots", "control", "solo"],
+    reason:
+      "Warlock brings demons, damage-over-time pressure, self-healing and control.",
+    watch:
+      "You are committing to ranged damage; the depth comes from managing pressure and your demon.",
+  },
+  Warrior: {
+    roles: ["Tank", "Melee DPS"],
+    tags: ["durable", "weapons", "direct", "pvp"],
+    reason:
+      "Warrior is the direct weapon specialist: durable melee damage or shield tanking.",
+    watch:
+      "There is less natural self-healing and utility than on the hybrid classes.",
+  },
+};
+const advisorResult = computed(() => {
+  const faction = advisor.faction === "Alliance" ? "Alliance" : "Horde";
+  const factionRaces = factions[faction];
   // Score classes against the faction first. Do not pick a default race first,
   // otherwise Horde Tauren would silently remove Priest, Mage and Warlock.
-  const factionClasses=Object.entries(combinations).filter(([,races])=>races.some(race=>factionRaces.includes(race))).map(([name])=>name)
-  const scores:Record<string,number>=Object.fromEntries(Object.keys(classProfiles).map(name=>[name,factionClasses.includes(name)?20:-1000]))
-  const add=(names:string[],points:number)=>names.forEach(name=>{if(name in scores)scores[name]+=points})
-  if(advisor.focus==='PvP')add(['Rogue','Shaman','Warrior','Hunter','Priest'],18)
-  if(advisor.focus==='PvE')add(['Druid','Paladin','Priest','Mage','Warrior'],12)
-  if(advisor.focus==='Support & utility')add(['Druid','Paladin','Shaman','Priest'],22)
-  if(advisor.focus==='Gold & gathering')add(['Hunter','Druid','Warlock'],8)
-  if(advisor.role)add(Object.keys(classProfiles).filter(name=>classProfiles[name].roles.includes(advisor.role)),28)
-  if(advisor.role==='Healer'){add(['Priest'],18);add(['Shaman'],15);add(['Paladin'],12);add(['Druid'],8)}
-  if(advisor.playstyle==='Stealth & burst')add(['Rogue'],35)
-  if(advisor.playstyle==='Mobile & ranged')add(['Hunter','Druid','Shaman'],24)
-  if(advisor.playstyle==='Simple & durable')add(['Warrior','Paladin','Hunter'],20)
-  if(advisor.playstyle==='Support & utility')add(['Druid','Paladin','Shaman'],18)
-  if(advisor.combat==='Control & disruption')add(['Mage','Rogue','Warlock','Priest'],20)
-  if(advisor.combat==='Damage over time & pressure')add(['Warlock'],38)
-  if(advisor.combat==='Sustained pressure')add(['Warlock','Priest','Shaman'],30)
-  if(advisor.combat==='Healing & support')add(['Priest','Shaman','Paladin','Druid'],25)
-  if(advisor.combat==='Burst damage')add(['Rogue','Mage','Hunter','Warrior'],12)
-  if(advisor.playstyle==='Demons & dark magic')add(['Warlock'],35)
-  if(advisor.independence==='I want to handle things alone')add(['Hunter','Warlock','Druid','Rogue'],12)
-  if(advisor.independence==='I want to be needed by the group')add(['Shaman','Paladin','Priest','Druid'],15)
-  if(advisor.complexity==='I want depth and many buttons')add(['Rogue','Druid','Shaman','Mage','Warlock'],10)
-  if(advisor.priorities.includes('Helping the crew'))add(['Shaman','Paladin','Priest','Druid'],12)
-  if(advisor.priorities.includes('Winning fights'))add(['Rogue','Warrior','Mage','Hunter'],10)
-  for(const signal of [advisor.playstyle,advisor.combat]){
-    const matches=advisorSignals[signal as keyof typeof advisorSignals]
-    if(matches)add(matches,24)
+  const factionClasses = Object.entries(combinations)
+    .filter(([, races]) => races.some((race) => factionRaces.includes(race)))
+    .map(([name]) => name);
+  const scores: Record<string, number> = Object.fromEntries(
+    Object.keys(classProfiles).map((name) => [
+      name,
+      factionClasses.includes(name) ? 20 : -1000,
+    ]),
+  );
+  const add = (names: string[], points: number) =>
+    names.forEach((name) => {
+      if (name in scores) scores[name] += points;
+    });
+  if (advisor.focus === "PvP")
+    add(["Rogue", "Shaman", "Warrior", "Hunter", "Priest"], 18);
+  if (advisor.focus === "PvE")
+    add(["Druid", "Paladin", "Priest", "Mage", "Warrior"], 12);
+  if (advisor.focus === "Support & utility")
+    add(["Druid", "Paladin", "Shaman", "Priest"], 22);
+  if (advisor.focus === "Gold & gathering")
+    add(["Hunter", "Druid", "Warlock"], 8);
+  if (advisor.role)
+    add(
+      Object.keys(classProfiles).filter((name) =>
+        classProfiles[name].roles.includes(advisor.role),
+      ),
+      28,
+    );
+  if (advisor.role === "Healer") {
+    add(["Priest"], 18);
+    add(["Shaman"], 15);
+    add(["Paladin"], 12);
+    add(["Druid"], 8);
+  }
+  if (advisor.playstyle === "Stealth & burst") add(["Rogue"], 35);
+  if (advisor.playstyle === "Mobile & ranged")
+    add(["Hunter", "Druid", "Shaman"], 24);
+  if (advisor.playstyle === "Simple & durable")
+    add(["Warrior", "Paladin", "Hunter"], 20);
+  if (advisor.playstyle === "Support & utility")
+    add(["Druid", "Paladin", "Shaman"], 18);
+  if (advisor.combat === "Control & disruption")
+    add(["Mage", "Rogue", "Warlock", "Priest"], 20);
+  if (advisor.combat === "Damage over time & pressure") add(["Warlock"], 38);
+  if (advisor.combat === "Sustained pressure")
+    add(["Warlock", "Priest", "Shaman"], 30);
+  if (advisor.combat === "Healing & support")
+    add(["Priest", "Shaman", "Paladin", "Druid"], 25);
+  if (advisor.combat === "Burst damage")
+    add(["Rogue", "Mage", "Hunter", "Warrior"], 12);
+  if (advisor.playstyle === "Demons & dark magic") add(["Warlock"], 35);
+  if (advisor.independence === "I want to handle things alone")
+    add(["Hunter", "Warlock", "Druid", "Rogue"], 12);
+  if (advisor.independence === "I want to be needed by the group")
+    add(["Shaman", "Paladin", "Priest", "Druid"], 15);
+  if (advisor.complexity === "I want depth and many buttons")
+    add(["Rogue", "Druid", "Shaman", "Mage", "Warlock"], 10);
+  if (advisor.priorities.includes("Helping the crew"))
+    add(["Shaman", "Paladin", "Priest", "Druid"], 12);
+  if (advisor.priorities.includes("Winning fights"))
+    add(["Rogue", "Warrior", "Mage", "Hunter"], 10);
+  for (const signal of [advisor.playstyle, advisor.combat]) {
+    const matches = advisorSignals[signal as keyof typeof advisorSignals];
+    if (matches) add(matches, 24);
   }
   // Match the answers against the actual Forever class identities instead of
   // treating every ranged or melee class as interchangeable.
-  const answerTags=[
-    advisor.playstyle==='Stealth & burst'?'stealth':'',
-    advisor.playstyle==='Mobile & ranged'?'mobile':'',
-    advisor.playstyle==='Simple & durable'?'durable':'',
-    advisor.combat==='Sustained pressure'?'dots':'',
-    advisor.combat==='Control & disruption'?'control':'',
-    advisor.combat==='Healing & support'?'healing':'',
-    advisor.independence==='I want to handle things alone'?'solo':'',
-    advisor.independence==='I want to be needed by the group'?'support':'',
-    advisor.focus==='PvP'?'pvp':'',
-    advisor.role==='Ranged DPS'?'ranged':'',
-    advisor.role==='Melee DPS'?'melee':'',
-    advisor.role==='Tank'?'tank':'',
-    advisor.role==='Healer'?'healing':'',
-    advisor.complexity==='I want depth and many buttons'?'complex':''
-  ].filter(Boolean)
-  for(const [name,profile] of Object.entries(classProfiles)){
-    const matches=answerTags.filter(tag=>profile.tags.includes(tag)).length
-    scores[name]+=matches*9
+  const answerTags = [
+    advisor.playstyle === "Stealth & burst" ? "stealth" : "",
+    advisor.playstyle === "Mobile & ranged" ? "mobile" : "",
+    advisor.playstyle === "Simple & durable" ? "durable" : "",
+    advisor.combat === "Sustained pressure" ? "dots" : "",
+    advisor.combat === "Control & disruption" ? "control" : "",
+    advisor.combat === "Healing & support" ? "healing" : "",
+    advisor.independence === "I want to handle things alone" ? "solo" : "",
+    advisor.independence === "I want to be needed by the group"
+      ? "support"
+      : "",
+    advisor.focus === "PvP" ? "pvp" : "",
+    advisor.role === "Ranged DPS" ? "ranged" : "",
+    advisor.role === "Melee DPS" ? "melee" : "",
+    advisor.role === "Tank" ? "tank" : "",
+    advisor.role === "Healer" ? "healing" : "",
+    advisor.complexity === "I want depth and many buttons" ? "complex" : "",
+  ].filter(Boolean);
+  for (const [name, profile] of Object.entries(classProfiles)) {
+    const matches = answerTags.filter((tag) =>
+      profile.tags.includes(tag),
+    ).length;
+    scores[name] += matches * 9;
   }
-  const ranked=Object.entries(scores).filter(([,score])=>score>-100).sort((a,b)=>b[1]-a[1])
-  let className=ranked[0]?.[0]||'Warrior'
-  const classRaces=combinations[className].filter(race=>factionRaces.includes(race))
-  const raceHint=advisor.playstyle==='Stealth & burst'?(faction==='Horde'?'Orc':'Night Elf'):advisor.playstyle==='Mobile & ranged'?(faction==='Horde'?'Troll':'Dwarf'):advisor.role==='Healer'?(faction==='Horde'?'Undead':'Dwarf'):faction==='Horde'?'Tauren':'Human'
-  const race=classRaces.includes(raceHint)?raceHint:classRaces[0]
-  const allowed=factionClasses
-  const profs=advisor.focus==='Gold & gathering'?['Mining','Herbalism']:advisor.role==='Healer'?['Alchemy','Herbalism']:['Engineering','Mining']
-  const bestScore=ranked[0]?.[1]||1
-  const fit=(score:number)=>Math.max(1,Math.min(99,Math.round((score/bestScore)*100)))
-  const alternatives=ranked.filter(([name])=>name!==className&&allowed.includes(name)).slice(0,2).map(([name,score])=>({name,score:fit(score)}))
-  return {className,race,faction,profs,reason:classProfiles[className].reason,watch:classProfiles[className].watch,score:fit(scores[className]),alternatives}
-})
-function professionIcon(name:string){const icons:Record<string,string>={Engineering:'inv_misc_gear_01',Mining:'inv_pick_02',Herbalism:'trade_herbalism',Alchemy:'trade_alchemy',Cooking:'inv_misc_food_15',Fishing:'trade_fishing',"First Aid":'spell_holy_sealofsacrifice'};return `https://wow.zamimg.com/images/wow/icons/medium/${icons[name]||'inv_misc_questionmark'}.jpg`}
-function professionBenefit(name:string){const benefits:Record<string,string>={Engineering:'Combat utility and gadgets',Mining:'+5% total health',Herbalism:'Magic resistance as skill rises',Alchemy:'Stronger and longer elixirs',Cooking:'Food buffs and sustain',Fishing:'Food ingredients and utility',"First Aid":'Emergency self-healing'};return benefits[name]||'Useful profession bonus'}
-function raceIcon(race:string){const icons:Record<string,string>={Orc:'race_orc_male',Undead:'race_scourge_male',Tauren:'race_tauren_male',Troll:'race_troll_male',Human:'race_human_male',Dwarf:'race_dwarf_male','Night Elf':'race_nightelf_male',Gnome:'race_gnome_male',Skyborne:'race_skyborne'};return `https://talentsforever.com/assets/icons/${icons[race]||'race_human_male'}.jpg?i=2`}
-function racialDescription(name:string){const descriptions:Record<string,string>={"Blood Fury":"+10% Attack Power and Spell Power for 15 sec. · 2 min cooldown","Hardiness":"Stun duration reduced by 20%","Axe Specialization":"+1% critical strike chance with axes","Shatter Curse":"Removes Curses and Banes; -15% magic damage for 8 sec","Underwater Breathing":"Underwater breath lasts 300% longer","Will of the Forsaken":"Removes Charm, Fear and Sleep effects","Cannibalize":"Regenerates 7% Health and Mana every 2 sec for 10 sec","Touch of the Grave":"Attacks can drain up to 5% of your maximum Health","War Stomp":"Stuns up to 5 enemies within 8 yards for 2 sec","Endurance":"+5% total Health and +1% chance to hit","Cultivation":"Grow a duplicate nearby herb without Herbalism","Plainsrunning":"Movement speed builds up to +30% while moving","Berserking":"+10% spellcasting and attack speed for 10 sec","Regeneration":"+10% Health regeneration; partly continues in combat","Beast Slaying":"+5% damage against Beasts","Rapid Regeneration":"Regenerate 50% maximum Health over 6 sec","Walk on Air":"Glide downward for 10 sec while controlling direction","Elemental Insight":"+5% damage against Elementals","Wind Blessed":"+1% spellcasting, melee and ranged Haste","Sword Specialization":"+2% critical strike chance with swords","The Human Spirit":"+5% Spirit","Perception":"Greatly increases stealth detection for 20 sec","Will to Survive":"Removes all Stun effects","Find Treasure":"Shows nearby treasure on the minimap","Stoneform":"Removes Bleed, Poison and Disease; -10% physical damage for 8 sec","Mace Specialization":"+1% critical strike chance with maces","Big Game Hunter":"+5% damage against Beasts","Shadowmeld":"Enter the shadows until moving or cancelled","Quickness":"+1% Dodge and +2% movement speed","Wisp Spirit":"Become a wisp on death with +75% movement speed","Elune's Light":"+10% critical strike chance for 15 sec","Escape Artist":"Removes movement impairing effects and grants 3 sec immunity","Expansive Mind":"+5% maximum Mana, Rage or Energy","Engineering Specialization":"Engineering devices fail or backfire 20% less often","Eureka!":"Next 3 damaging abilities cost less and deal +10% damage"};return descriptions[name]||'Forever racial passive'}
-const racialPassives=[
-  {faction:'Horde',race:'Orc',items:[['Blood Fury','racial_orc_berserkerstrength'],['Hardiness','inv_helmet_23'],['Axe Specialization','inv_axe_02'],['Shatter Curse','spell_nature_removecurse']]},
-  {faction:'Horde',race:'Undead',items:[['Underwater Breathing','spell_shadow_demonbreath'],['Will of the Forsaken','spell_shadow_raisedead'],['Cannibalize','ability_racial_cannibalize'],['Touch of the Grave','spell_shadow_fingerofdeath']]},
-  {faction:'Horde',race:'Tauren',items:[['War Stomp','ability_warstomp'],['Endurance','spell_nature_unyeildingstamina'],['Cultivation','inv_misc_flower_01'],['Plainsrunning','achievement_zone_barrens_01']]},
-  {faction:'Horde',race:'Troll',items:[['Berserking','racial_troll_berserk'],['Regeneration','spell_nature_regenerate'],['Beast Slaying','inv_misc_pelt_bear_ruin_02'],['Rapid Regeneration','ability_racial_regeneratin']]},
-  {faction:'Horde / Alliance',race:'Skyborne',items:[['Walk on Air','inv_elemental_primal_air'],['Elemental Insight','achievement_raidprimalist_windelemental'],['Wind Blessed','inv_misc_volatileair']]},
-  {faction:'Alliance',race:'Human',items:[['Sword Specialization','ability_meleedamage'],['The Human Spirit','inv_enchant_shardbrilliantsmall'],['Perception','spell_nature_sleep'],['Will to Survive','spell_shadow_charm']]},
-  {faction:'Alliance',race:'Dwarf',items:[['Find Treasure','racial_dwarf_findtreasure'],['Stoneform','spell_shadow_unholystrength'],['Mace Specialization','inv_hammer_05'],['Big Game Hunter','inv_weapon_rifle_05']]},
-  {faction:'Alliance',race:'Night Elf',items:[['Shadowmeld','ability_ambush'],['Quickness','ability_racial_shadowmeld'],['Wisp Spirit','spell_nature_wispsplode'],["Elune's Light",'spell_nature_moonglow']]},
-  {faction:'Alliance',race:'Gnome',items:[['Escape Artist','ability_rogue_trip'],['Expansive Mind','inv_enchant_essenceeternallarge'],['Engineering Specialization','inv_misc_gear_01'],['Eureka!','inv_gnometoy']]}
-]
-const racialColumns=computed(()=>({Horde:racialPassives.filter(race=>race.faction.includes('Horde')),Alliance:racialPassives.filter(race=>race.faction.includes('Alliance'))}))
-const racialFactionNames=['Horde','Alliance'] as const
-function racialIcon(icon:string){return `https://talentsforever.com/assets/icons/${icon}.jpg?i=2`}
-const activeArticle=ref<typeof fieldNotes[number]|null>(null)
-const selectedClasses=computed(()=>new Set(crewMembers.value.flatMap(member=>member.class.split(',').map(item=>item.trim()))))
-const selectedRoles=computed(()=>new Set(crewMembers.value.flatMap(member=>(member.roles||'').split(',').map(item=>item.trim()).filter(Boolean))))
-const roleCounts=computed(()=>Object.fromEntries(allRoles.map(role=>[role,crewMembers.value.filter(member=>(member.roles||'').split(',').map(item=>item.trim()).includes(role)).length])))
-function addCharacter(){if(form.character&&form.race&&form.class){form.characters.push({character:form.character,race:form.race,class:form.class});form.character='';form.race='';form.class=''}}
-function removeCharacter(index:number){form.characters.splice(index,1)}
-async function submitForm(){const body=new URLSearchParams({'form-name':'crew-signup',name:form.name,faction:form.faction,race:form.race,character:form.character,class:form.class,characters:JSON.stringify(form.characters),launch:form.launch,note:form.note});await fetch('/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});submitted.value=true}
-const data=ref<Dashboard>({activePlayers:0,totalLevels:0,deaths:0,playedHours:0,characters:[],events:[]})
-const pages=[['overview','OVERVIEW']]
-const title=computed(()=>pages.find(p=>p[0]===route.value)?.[1]||'OVERVIEW')
-function updateSeo(page:string){const advisorPage=page==='advisor';const title=advisorPage?'Forever Class Advisor — Find Your Main | CzechDream Forever':'CzechDream Forever — Zbytoční sú späť';const description=advisorPage?'Find your best World of Warcraft: Forever class, race and professions with the CzechDream Forever character advisor.':'CzechDream Forever — our crew, launch countdown and useful World of Warcraft: Forever notes.';document.title=title;for(const [name,content] of [['description',description],['og:title',title],['og:description',description]]){const selector=name.startsWith('og:')?`meta[property="${name}"]`:`meta[name="${name}"]`;let tag=document.querySelector<HTMLMetaElement>(selector);if(!tag){tag=document.createElement('meta');if(name.startsWith('og:'))tag.setAttribute('property',name);else tag.setAttribute('name',name);document.head.appendChild(tag)}tag.content=content}let canonical=document.querySelector<HTMLLinkElement>('link[rel="canonical"]');if(!canonical){canonical=document.createElement('link');canonical.rel='canonical';document.head.appendChild(canonical)}canonical.href=`${location.origin}${advisorPage?'/advisor':'/'}`}
-function navigate(to:string){route.value=to;menu.value=false;router.push(to==='overview'?'/' : `/${to}`);updateSeo(to)}
-async function scrollToFacts(){navigate('overview');await nextTick();document.querySelector('.forever-facts')?.scrollIntoView({behavior:'smooth',block:'start'})}
-function openFieldNote(note:typeof fieldNotes[number]){activeArticle.value=note;navigate(note.route)}
-watch(()=>router.currentRoute.value.path,path=>{route.value=path==='/'?'overview':path.slice(1);updateSeo(route.value)})
-onMounted(async()=>{if(location.hash){const legacy=location.hash.slice(1);history.replaceState({},'',legacy==='overview'?'/':`/${legacy}`);route.value=legacy}updateSeo(route.value);try{const sheet=await fetch(sheetCsv);if(sheet.ok){const members=parseCsv(await sheet.text());if(members.length)crewMembers.value=members as typeof crewMembers.value}}catch{ /* keep empty roster when unavailable */ }try{const r=await fetch('/api/dashboard');const type=r.headers.get('content-type')||'';if(r.ok&&type.includes('application/json'))data.value=await r.json()}catch{ /* local Vite has no Netlify function; keep zero state */ }finally{loading.value=false}})
-const launchAt=new Date("2026-11-05T00:00:00+01:00").getTime()
-const countdown=computed(()=>{const s=Math.max(0,Math.floor((launchAt-now.value)/1000));return {days:Math.floor(s/86400),hours:Math.floor(s%86400/3600),minutes:Math.floor(s%3600/60),seconds:s%60}})
-setInterval(()=>now.value=Date.now(),1000)
+  const ranked = Object.entries(scores)
+    .filter(([, score]) => score > -100)
+    .sort((a, b) => b[1] - a[1]);
+  let className = ranked[0]?.[0] || "Warrior";
+  const classRaces = combinations[className].filter((race) =>
+    factionRaces.includes(race),
+  );
+  const raceHint =
+    advisor.playstyle === "Stealth & burst"
+      ? faction === "Horde"
+        ? "Orc"
+        : "Night Elf"
+      : advisor.playstyle === "Mobile & ranged"
+        ? faction === "Horde"
+          ? "Troll"
+          : "Dwarf"
+        : advisor.role === "Healer"
+          ? faction === "Horde"
+            ? "Undead"
+            : "Dwarf"
+          : faction === "Horde"
+            ? "Tauren"
+            : "Human";
+  const race = classRaces.includes(raceHint) ? raceHint : classRaces[0];
+  const allowed = factionClasses;
+  const profs =
+    advisor.focus === "Gold & gathering"
+      ? ["Mining", "Herbalism"]
+      : advisor.role === "Healer"
+        ? ["Alchemy", "Herbalism"]
+        : ["Engineering", "Mining"];
+  const bestScore = ranked[0]?.[1] || 1;
+  const fit = (score: number) =>
+    Math.max(1, Math.min(99, Math.round((score / bestScore) * 100)));
+  const alternatives = ranked
+    .filter(([name]) => name !== className && allowed.includes(name))
+    .slice(0, 2)
+    .map(([name, score]) => ({ name, score: fit(score) }));
+  return {
+    className,
+    race,
+    faction,
+    profs,
+    reason: classProfiles[className].reason,
+    watch: classProfiles[className].watch,
+    score: fit(scores[className]),
+    alternatives,
+  };
+});
+function professionIcon(name: string) {
+  const icons: Record<string, string> = {
+    Engineering: "inv_misc_gear_01",
+    Mining: "inv_pick_02",
+    Herbalism: "trade_herbalism",
+    Alchemy: "trade_alchemy",
+    Cooking: "inv_misc_food_15",
+    Fishing: "trade_fishing",
+    "First Aid": "spell_holy_sealofsacrifice",
+  };
+  return `https://wow.zamimg.com/images/wow/icons/medium/${icons[name] || "inv_misc_questionmark"}.jpg`;
+}
+function professionBenefit(name: string) {
+  const benefits: Record<string, string> = {
+    Engineering: "Combat utility and gadgets",
+    Mining: "+5% total health",
+    Herbalism: "Magic resistance as skill rises",
+    Alchemy: "Stronger and longer elixirs",
+    Cooking: "Food buffs and sustain",
+    Fishing: "Food ingredients and utility",
+    "First Aid": "Emergency self-healing",
+  };
+  return benefits[name] || "Useful profession bonus";
+}
+function raceIcon(race: string) {
+  const icons: Record<string, string> = {
+    Orc: "race_orc_male",
+    Undead: "race_scourge_male",
+    Tauren: "race_tauren_male",
+    Troll: "race_troll_male",
+    Human: "race_human_male",
+    Dwarf: "race_dwarf_male",
+    "Night Elf": "race_nightelf_male",
+    Gnome: "race_gnome_male",
+    Skyborne: "race_skyborne",
+  };
+  return `https://talentsforever.com/assets/icons/${icons[race] || "race_human_male"}.jpg?i=2`;
+}
+function racialDescription(name: string) {
+  const descriptions: Record<string, string> = {
+    "Blood Fury":
+      "+10% Attack Power and Spell Power for 15 sec. · 2 min cooldown",
+    Hardiness: "Stun duration reduced by 20%",
+    "Axe Specialization": "+1% critical strike chance with axes",
+    "Shatter Curse": "Removes Curses and Banes; -15% magic damage for 8 sec",
+    "Underwater Breathing": "Underwater breath lasts 300% longer",
+    "Will of the Forsaken": "Removes Charm, Fear and Sleep effects",
+    Cannibalize: "Regenerates 7% Health and Mana every 2 sec for 10 sec",
+    "Touch of the Grave": "Attacks can drain up to 5% of your maximum Health",
+    "War Stomp": "Stuns up to 5 enemies within 8 yards for 2 sec",
+    Endurance: "+5% total Health and +1% chance to hit",
+    Cultivation: "Grow a duplicate nearby herb without Herbalism",
+    Plainsrunning: "Movement speed builds up to +30% while moving",
+    Berserking: "+10% spellcasting and attack speed for 10 sec",
+    Regeneration: "+10% Health regeneration; partly continues in combat",
+    "Beast Slaying": "+5% damage against Beasts",
+    "Rapid Regeneration": "Regenerate 50% maximum Health over 6 sec",
+    "Walk on Air": "Glide downward for 10 sec while controlling direction",
+    "Elemental Insight": "+5% damage against Elementals",
+    "Wind Blessed": "+1% spellcasting, melee and ranged Haste",
+    "Sword Specialization": "+2% critical strike chance with swords",
+    "The Human Spirit": "+5% Spirit",
+    Perception: "Greatly increases stealth detection for 20 sec",
+    "Will to Survive": "Removes all Stun effects",
+    "Find Treasure": "Shows nearby treasure on the minimap",
+    Stoneform:
+      "Removes Bleed, Poison and Disease; -10% physical damage for 8 sec",
+    "Mace Specialization": "+1% critical strike chance with maces",
+    "Big Game Hunter": "+5% damage against Beasts",
+    Shadowmeld: "Enter the shadows until moving or cancelled",
+    Quickness: "+1% Dodge and +2% movement speed",
+    "Wisp Spirit": "Become a wisp on death with +75% movement speed",
+    "Elune's Light": "+10% critical strike chance for 15 sec",
+    "Escape Artist":
+      "Removes movement impairing effects and grants 3 sec immunity",
+    "Expansive Mind": "+5% maximum Mana, Rage or Energy",
+    "Engineering Specialization":
+      "Engineering devices fail or backfire 20% less often",
+    "Eureka!": "Next 3 damaging abilities cost less and deal +10% damage",
+  };
+  return descriptions[name] || "Forever racial passive";
+}
+const racialPassives = [
+  {
+    faction: "Horde",
+    race: "Orc",
+    items: [
+      ["Blood Fury", "racial_orc_berserkerstrength"],
+      ["Hardiness", "inv_helmet_23"],
+      ["Axe Specialization", "inv_axe_02"],
+      ["Shatter Curse", "spell_nature_removecurse"],
+    ],
+  },
+  {
+    faction: "Horde",
+    race: "Undead",
+    items: [
+      ["Underwater Breathing", "spell_shadow_demonbreath"],
+      ["Will of the Forsaken", "spell_shadow_raisedead"],
+      ["Cannibalize", "ability_racial_cannibalize"],
+      ["Touch of the Grave", "spell_shadow_fingerofdeath"],
+    ],
+  },
+  {
+    faction: "Horde",
+    race: "Tauren",
+    items: [
+      ["War Stomp", "ability_warstomp"],
+      ["Endurance", "spell_nature_unyeildingstamina"],
+      ["Cultivation", "inv_misc_flower_01"],
+      ["Plainsrunning", "achievement_zone_barrens_01"],
+    ],
+  },
+  {
+    faction: "Horde",
+    race: "Troll",
+    items: [
+      ["Berserking", "racial_troll_berserk"],
+      ["Regeneration", "spell_nature_regenerate"],
+      ["Beast Slaying", "inv_misc_pelt_bear_ruin_02"],
+      ["Rapid Regeneration", "ability_racial_regeneratin"],
+    ],
+  },
+  {
+    faction: "Horde / Alliance",
+    race: "Skyborne",
+    items: [
+      ["Walk on Air", "inv_elemental_primal_air"],
+      ["Elemental Insight", "achievement_raidprimalist_windelemental"],
+      ["Wind Blessed", "inv_misc_volatileair"],
+    ],
+  },
+  {
+    faction: "Alliance",
+    race: "Human",
+    items: [
+      ["Sword Specialization", "ability_meleedamage"],
+      ["The Human Spirit", "inv_enchant_shardbrilliantsmall"],
+      ["Perception", "spell_nature_sleep"],
+      ["Will to Survive", "spell_shadow_charm"],
+    ],
+  },
+  {
+    faction: "Alliance",
+    race: "Dwarf",
+    items: [
+      ["Find Treasure", "racial_dwarf_findtreasure"],
+      ["Stoneform", "spell_shadow_unholystrength"],
+      ["Mace Specialization", "inv_hammer_05"],
+      ["Big Game Hunter", "inv_weapon_rifle_05"],
+    ],
+  },
+  {
+    faction: "Alliance",
+    race: "Night Elf",
+    items: [
+      ["Shadowmeld", "ability_ambush"],
+      ["Quickness", "ability_racial_shadowmeld"],
+      ["Wisp Spirit", "spell_nature_wispsplode"],
+      ["Elune's Light", "spell_nature_moonglow"],
+    ],
+  },
+  {
+    faction: "Alliance",
+    race: "Gnome",
+    items: [
+      ["Escape Artist", "ability_rogue_trip"],
+      ["Expansive Mind", "inv_enchant_essenceeternallarge"],
+      ["Engineering Specialization", "inv_misc_gear_01"],
+      ["Eureka!", "inv_gnometoy"],
+    ],
+  },
+];
+const racialColumns = computed(() => ({
+  Horde: racialPassives.filter((race) => race.faction.includes("Horde")),
+  Alliance: racialPassives.filter((race) => race.faction.includes("Alliance")),
+}));
+const racialFactionNames = ["Horde", "Alliance"] as const;
+function racialIcon(icon: string) {
+  return `https://talentsforever.com/assets/icons/${icon}.jpg?i=2`;
+}
+const activeArticle = ref<(typeof fieldNotes)[number] | null>(null);
+const selectedClasses = computed(
+  () =>
+    new Set(
+      crewMembers.value.flatMap((member) =>
+        member.class.split(",").map((item) => item.trim()),
+      ),
+    ),
+);
+const selectedRoles = computed(
+  () =>
+    new Set(
+      crewMembers.value.flatMap((member) =>
+        (member.roles || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ),
+);
+const roleCounts = computed(() =>
+  Object.fromEntries(
+    allRoles.map((role) => [
+      role,
+      crewMembers.value.filter((member) =>
+        (member.roles || "")
+          .split(",")
+          .map((item) => item.trim())
+          .includes(role),
+      ).length,
+    ]),
+  ),
+);
+function addCharacter() {
+  if (form.character && form.race && form.class) {
+    form.characters.push({
+      character: form.character,
+      race: form.race,
+      class: form.class,
+    });
+    form.character = "";
+    form.race = "";
+    form.class = "";
+  }
+}
+function removeCharacter(index: number) {
+  form.characters.splice(index, 1);
+}
+async function submitForm() {
+  const body = new URLSearchParams({
+    "form-name": "crew-signup",
+    name: form.name,
+    faction: form.faction,
+    race: form.race,
+    character: form.character,
+    class: form.class,
+    characters: JSON.stringify(form.characters),
+    launch: form.launch,
+    note: form.note,
+  });
+  await fetch("/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  submitted.value = true;
+}
+const data = ref<Dashboard>({
+  activePlayers: 0,
+  totalLevels: 0,
+  deaths: 0,
+  playedHours: 0,
+  characters: [],
+  events: [],
+});
+const pages = [["overview", "OVERVIEW"]];
+const title = computed(
+  () => pages.find((p) => p[0] === route.value)?.[1] || "OVERVIEW",
+);
+function updateSeo(page: string) {
+  const advisorPage = page === "advisor";
+  const title = advisorPage
+    ? "Forever Class Advisor — Find Your Main | CzechDream Forever"
+    : "CzechDream Forever — Zbytoční sú späť";
+  const description = advisorPage
+    ? "Find your best World of Warcraft: Forever class, race and professions with the CzechDream Forever character advisor."
+    : "CzechDream Forever — our crew, launch countdown and useful World of Warcraft: Forever notes.";
+  document.title = title;
+  for (const [name, content] of [
+    ["description", description],
+    ["og:title", title],
+    ["og:description", description],
+  ]) {
+    const selector = name.startsWith("og:")
+      ? `meta[property="${name}"]`
+      : `meta[name="${name}"]`;
+    let tag = document.querySelector<HTMLMetaElement>(selector);
+    if (!tag) {
+      tag = document.createElement("meta");
+      if (name.startsWith("og:")) tag.setAttribute("property", name);
+      else tag.setAttribute("name", name);
+      document.head.appendChild(tag);
+    }
+    tag.content = content;
+  }
+  let canonical = document.querySelector<HTMLLinkElement>(
+    'link[rel="canonical"]',
+  );
+  if (!canonical) {
+    canonical = document.createElement("link");
+    canonical.rel = "canonical";
+    document.head.appendChild(canonical);
+  }
+  canonical.href = `${location.origin}${advisorPage ? "/advisor" : "/"}`;
+}
+function navigate(to: string) {
+  route.value = to;
+  menu.value = false;
+  router.push(to === "overview" ? "/" : `/${to}`);
+  updateSeo(to);
+}
+async function scrollToFacts() {
+  navigate("overview");
+  await nextTick();
+  document
+    .querySelector(".forever-facts")
+    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function openFieldNote(note: (typeof fieldNotes)[number]) {
+  activeArticle.value = note;
+  navigate(note.route);
+}
+watch(
+  () => router.currentRoute.value.path,
+  (path) => {
+    route.value = path === "/" ? "overview" : path.slice(1);
+    updateSeo(route.value);
+  },
+);
+onMounted(async () => {
+  if (location.hash) {
+    const legacy = location.hash.slice(1);
+    history.replaceState({}, "", legacy === "overview" ? "/" : `/${legacy}`);
+    route.value = legacy;
+  }
+  updateSeo(route.value);
+  try {
+    const sheet = await fetch(sheetCsv);
+    if (sheet.ok) {
+      const members = parseCsv(await sheet.text());
+      if (members.length)
+        crewMembers.value = members as typeof crewMembers.value;
+    }
+  } catch {
+    /* keep empty roster when unavailable */
+  }
+  try {
+    const r = await fetch("/api/dashboard");
+    const type = r.headers.get("content-type") || "";
+    if (r.ok && type.includes("application/json")) data.value = await r.json();
+  } catch {
+    /* local Vite has no Netlify function; keep zero state */
+  } finally {
+    loading.value = false;
+  }
+});
+const launchAt = new Date("2026-11-05T00:00:00+01:00").getTime();
+const countdown = computed(() => {
+  const s = Math.max(0, Math.floor((launchAt - now.value) / 1000));
+  return {
+    days: Math.floor(s / 86400),
+    hours: Math.floor((s % 86400) / 3600),
+    minutes: Math.floor((s % 3600) / 60),
+    seconds: s % 60,
+  };
+});
+setInterval(() => (now.value = Date.now()), 1000);
 </script>
-<template><div class="app-shell"><header class="topbar"><button class="mobile-menu" @click="menu=!menu">☰</button><div class="brand" @click="navigate('overview')"><div class="brand-mark">✦</div><div><b>CZECHDREAM</b><span>FOREVER</span></div></div><nav :class="{open:menu}"><a v-for="page in pages" :key="page[0]" :class="{selected:route===page[0]}" @click="navigate(page[0])">{{page[1]}}</a><a class="advisor-nav-link" @click="navigate('advisor')">CLASS ADVISOR</a><a class="professions-nav-link" @click="navigate('professions')">PROFESSIONS</a><a class="races-nav-link" @click="navigate('racials')">RACES</a><a href="https://talentsforever.com/" target="_blank" rel="noreferrer">TALENTS</a><a href="https://www.wowhead.com/forever/news" target="_blank" rel="noreferrer">NEWS</a><a href="https://discord.gg/cmtnpW7jUU" target="_blank" rel="noreferrer">DISCORD</a></nav><div class="resource-links"><a href="https://talentsforever.com/" target="_blank" rel="noreferrer">TALENTS</a><a href="https://www.wowhead.com/forever/news" target="_blank" rel="noreferrer">NEWS</a><a href="https://discord.gg/cmtnpW7jUU" target="_blank" rel="noreferrer">DISCORD</a></div><div class="top-actions"><span class="public-badge">PUBLIC GUILD DASHBOARD</span></div></header><main><section v-if="route==='overview'" class="launch-banner"><div><div class="kicker"><i></i> WORLD OF WARCRAFT: FOREVER</div><h2>THE JOURNEY BEGINS</h2><p>Global launch · 5 November 2026 · 00:00 CET</p></div><div class="countdown"><div><strong>{{String(countdown.days).padStart(2,'0')}}</strong><small>DAYS</small></div><b>:</b><div><strong>{{String(countdown.hours).padStart(2,'0')}}</strong><small>HOURS</small></div><b>:</b><div><strong>{{String(countdown.minutes).padStart(2,'0')}}</strong><small>MIN</small></div><b>:</b><div><strong>{{String(countdown.seconds).padStart(2,'0')}}</strong><small>SEC</small></div></div></section><section v-if="route==='overview'" class="crew-signup-area"><div class="kicker"><i></i> CZECHDREAM CREW</div><h2>ZBYTOČNÍ ARE BACK!</h2><p>Tell us what you are playing and what you want to focus on in Forever.</p><div class="crew-list"><div v-if="!crewMembers.length" class="empty-state">Zatiaľ sa nepridal nikto. Buď prvý.</div><div v-for="member in crewMembers" :key="member.name" class="crew-member"><span class="faction-badge"><img v-if="factionIcon(member.faction)" :src="factionIcon(member.faction)" :alt="member.faction" :title="member.faction"></span><div class="member-identity"><strong>{{member.name}}</strong><small>{{member.roles || "No focus selected"}}</small></div><div class="member-classes"><span v-for="className in member.class.split(',')" :key="className" class="class-icon-wrap"><img v-if="classIcon(className)" :src="classIcon(className)" :alt="className.trim()" :title="className.trim()"><span class="class-tooltip">{{className.trim()}}</span></span></div></div></div><section class="coverage-board"><div class="coverage-heading"><div><div class="kicker">CREW COMPOSITION</div><h3>WHAT WE HAVE · WHAT WE NEED</h3></div><span>{{crewMembers.length}} players locked in</span></div><div class="coverage-classes"><div v-for="className in allClasses" :key="className" :class="['coverage-class',{missing:!selectedClasses.has(className)}]"><span class="coverage-icon-wrap"><img :src="classIcon(className)" :alt="className"><span class="class-tooltip">{{className}}</span></span><small>{{className}}</small></div></div><div class="coverage-roles"><div v-for="role in allRoles" :key="role" :class="['coverage-role',{missing:!selectedRoles.has(role)}]"><strong>{{roleCounts[role]}}</strong><span>{{role}}</span><small>{{roleCounts[role] === 1 ? 'player' : 'players'}}</small></div></div></section><button class="gold-button join-button" @click="openSignup">JOIN THE CREW</button><div v-if="showForm" class="form-modal"><button type="button" class="form-close" @click="closeSignup">×</button><iframe :src="signupUrl" title="CzechDream Forever signup form"></iframe></div><form v-if="false" class="signup-form" name="crew-signup" .prevent="submitForm"><div v-if="submitted" class="success">Hotovo. Si zapísaný v CzechDream crew.</div><template v-else><input v-model="form.name" name="name" required placeholder="Tvoje meno / nick"><div class="faction-picker"><button type="button" :class="{chosen:form.faction==='Horde'}" @click="form.faction='Horde';form.race='';form.class=''"><img src="https://wow.zamimg.com/images/wow/icons/tiny/side_horde.gif" alt=""> HORDE</button><button type="button" :class="{chosen:form.faction==='Alliance'}" @click="form.faction='Alliance';form.race='';form.class=''"><img src="https://wow.zamimg.com/images/wow/icons/tiny/side_alliance.gif" alt=""> ALLIANCE</button></div><div class="choice-block"><label>RASA</label><div class="choice-grid"><button v-for="race in factionRaces" :key="race" type="button" :class="{chosen:form.race===race}" @click="form.race=race;form.class=''">{{race}}</button></div></div><div class="choice-block"><label>CLASSA</label><div class="choice-grid"><button v-for="className in availableClasses" :key="className" type="button" :class="{chosen:form.class===className}" @click="form.class=className">{{className}}</button></div></div><input v-model="form.character" name="character" required placeholder="Meno postavy"><button class="ghost-button add-character" type="button" @click="addCharacter">+ PRIDAŤ ĎALŠIU POSTAVU</button><div v-if="form.characters.length" class="planned-characters"><div v-for="(character,index) in form.characters" :key="index"><strong>{{character.character}}</strong><span>{{character.race}} · {{character.class}}</span><button type="button" @click="removeCharacter(index)">×</button></div></div><textarea v-model="form.note" name="note" placeholder="Poznámka"></textarea><button class="gold-button" type="submit">ZAPÍSAŤ MA →</button></template></form></section><section v-if="false" class="forever-facts"><div class="kicker"><i></i> FOREVER FIELD NOTES</div><h2>SHORT READS FROM AZEROTH</h2><p class="facts-intro">Useful notes for the journey. More topics will be added as Forever gets closer.</p><div class="facts-grid"><article v-for="note in fieldNotes" :key="note.route" class="fact-card" @click="openFieldNote(note)"><div class="fact-cover"><img :src="`https://wow.zamimg.com/images/wow/icons/medium/${note.icon}.jpg`" :alt="note.title"></div><div class="fact-content"><small>{{note.category}}</small><strong>{{note.title}}</strong><span>{{note.text}}</span><b>READ NOTES ↗</b></div></article></div></section><section v-if="route==='facts'" class="facts-page"><button class="ghost-button facts-back" @click="navigate('overview')">← BACK TO OVERVIEW</button><div class="article-kicker"><span>FOREVER UPDATE</span><small>UPDATED 21 SEP 2026</small></div><h2>WORLD OF WARCRAFT: FOREVER OVERVIEW</h2><p class="article-lead">A new evolution of WoW Classic. Start fresh at level 1, explore a bigger Azeroth and build your legacy all the way to level 60.</p><div class="article-meta"><span>LAUNCH</span><strong>5 NOVEMBER 2026 · 00:00 CET</strong></div><div class="article-sections"><article><img src="https://wow.zamimg.com/images/wow/icons/medium/inv_misc_map_01.jpg" alt="New zones"><div><small>THE WORLD</small><h3>New zones and Skyborne</h3><p>Forever adds Mount Hyjal, Shen'Dralas, Riverglades and Zephras Isle. Skyborne can be played by both factions, with Shaman available to Horde and Mage to Alliance.</p></div></article><article><img src="https://wow.zamimg.com/images/wow/icons/medium/inv_sword_07.jpg" alt="Dungeons and raids"><div><small>ENDGAME</small><h3>New dungeons and raids</h3><p>Nine dungeons arrive at launch. The Barrow Deeps and Hyjal Summit open on 9 December, alongside the return of Onyxia's Lair.</p></div></article><article><img src="https://wow.zamimg.com/images/wow/icons/medium/trade_alchemy.jpg" alt="Professions"><div><small>PROFESSIONS</small><h3>Professions get meaningful bonuses</h3><p>Professions add passive stats, utility and preparation tools. Campsites also let players share profession-based buffs in the open world.</p></div></article><article><img src="https://wow.zamimg.com/images/wow/icons/medium/ability_hunter_mendpet.jpg" alt="Legacy system"><div><small>PROGRESSION</small><h3>Legacy system and talents</h3><p>Earn Legacy Points from exploring, leveling, tradeskills, PvP, reputations, dungeons and raids. Spend them on account-wide non-combat perks.</p></div></article><article><img src="https://wow.zamimg.com/images/wow/icons/medium/ability_warrior_bloodfrenzy.jpg" alt="PvP"><div><small>PVP</small><h3>Darkspear Islands</h3><p>A new 15v15 battleground joins an updated seasonal PvP system. Perfect for the CzechDream crew — we are going in mainly for PvP.</p></div></article><article><img src="https://wow.zamimg.com/images/wow/icons/medium/inv_chest_cloth_17.jpg" alt="Transmog"><div><small>YOUR CHARACTER</small><h3>Class changes and optional transmog</h3><p>New spells, talents, racials and class-race combinations arrive alongside an optional transmog system that can be disabled.</p></div></article></div></section><section v-if="route==='professions'" class="facts-page"><button class="ghost-button facts-back" @click="navigate('overview')">← BACK TO FIELD NOTES</button><div class="article-kicker"><span>PROFESSION NOTES</span><small>UPDATED 21 SEP 2026</small></div><h2>PROFESSIONS IN FOREVER</h2><p class="article-lead">A quick guide to the passive bonuses, stats and utility each profession brings to your character.</p><div class="profession-list"><article v-for="fact in foreverFacts" :key="fact.name" class="profession-card"><img :src="`https://wow.zamimg.com/images/wow/icons/medium/${fact.icon}.jpg`" :alt="fact.name"><div><small>PROFESSION</small><h3>{{fact.name}}</h3><strong>{{fact.bonus}}</strong><p>{{fact.detail}}</p></div></article></div></section><section v-if="route==='article' && activeArticle" class="facts-page"><button class="ghost-button facts-back" @click="navigate('overview')">← BACK TO FIELD NOTES</button><div class="article-kicker"><span>{{activeArticle.category}}</span><small>UPDATED 21 SEP 2026</small></div><h2>{{activeArticle.title}}</h2><p class="article-lead">{{activeArticle.text}}</p><div class="article-feature"><img :src="`https://wow.zamimg.com/images/wow/icons/medium/${activeArticle.icon}.jpg`" :alt="activeArticle.title"><p>{{activeArticle.body}}</p></div></section><section v-if="route==='racials'" class="facts-page"><button class="ghost-button facts-back" @click="navigate('overview')">← BACK TO FIELD NOTES</button><div class="article-kicker"><span>RACE NOTES</span><small>FROM TALENTS FOREVER</small></div><h2>RACIAL PASSIVES</h2><p class="article-lead">A quick look at what each race brings to the table in Forever. Hover an icon to see the passive name.</p><div class="racial-columns"><div v-for="faction in racialFactionNames" :key="faction" class="racial-column"><h3 :class="faction.toLowerCase()">{{faction}}</h3><article v-for="race in racialColumns[faction]" :key="race.race" class="racial-card"><div class="racial-heading"><img class="racial-portrait" :src="raceIcon(race.race)" :alt="race.race"><div><strong>{{race.race}}</strong><small>{{race.faction}}</small></div></div><div class="racial-icons"><span v-for="item in race.items" :key="item[0]" class="racial-icon"><img :src="racialIcon(item[1])" :alt="item[0]" :title="item[0]"><div><strong>{{item[0]}}</strong><small>{{racialDescription(item[0])}}</small></div></span></div></article></div></div></section><section v-if="route==='advisor'" class="advisor-page"><button class="ghost-button facts-back" @click="navigate('overview')">← BACK TO FIELD NOTES</button><div class="article-kicker"><span>CHARACTER BUILDER</span><small>CLASS ADVISOR</small></div><h2>FIND YOUR FOREVER MAIN</h2><p class="article-lead">Answer the questions and get a recommendation built around how you actually want to play.</p><div class="advisor-progress"><span>STEP {{advisorStep<10 ? advisorStep+1 : 'RESULT'}} OF 10</span><div><i :style="{width:`${(Math.min(advisorStep+1,10)/10)*100}%`}"></i></div></div><div class="advisor-form"><fieldset v-if="advisorStep===0"><legend>WHICH FACTION?</legend><label v-for="item in ['Horde','Alliance']" :key="item" :class="['advisor-option',{chosen:advisor.faction===item}]"><input v-model="advisor.faction" type="radio" name="faction" :value="item"><img :src="factionIcon(item)" :alt="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===1"><legend>WHAT DO YOU WANT TO FOCUS ON?</legend><label v-for="item in ['PvP','PvE','Support & utility','Gold & gathering']" :key="item" :class="['advisor-option',{chosen:advisor.focus===item}]"><input v-model="advisor.focus" type="radio" name="focus" :value="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===2"><legend>WHAT ROLE SOUNDS BEST?</legend><label v-for="item in ['Melee DPS','Ranged DPS','Healer','Tank']" :key="item" :class="['advisor-option',{chosen:advisor.role===item}]"><input v-model="advisor.role" type="radio" name="role" :value="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===3"><legend>WHAT PLAYSTYLE DO YOU WANT?</legend><label v-for="item in ['Stealth & burst','Support & utility','Simple & durable','Mobile & ranged','Pet & solo play','Demons & dark magic','Totems & hybrid utility','Shapeshifting & flexibility','Heavy armour & protection']" :key="item" :class="['advisor-option',{chosen:advisor.playstyle===item}]"><input v-model="advisor.playstyle" type="radio" name="playstyle" :value="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===4"><legend>WHAT MATTERS MOST?</legend><label v-for="item in ['Winning fights','Helping the crew','Making gold','Collecting useful bonuses']" :key="item" :class="['advisor-option',{chosen:advisor.priorities.includes(item)}]"><input v-model="advisor.priorities" type="checkbox" :value="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===5"><legend>HOW MUCH EXPERIENCE DO YOU HAVE?</legend><label v-for="item in ['New to WoW','Played Classic','Played many versions']" :key="item" :class="['advisor-option',{chosen:advisor.experience===item}]"><input v-model="advisor.experience" type="radio" name="experience" :value="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===6"><legend>HOW DO YOU WANT TO WIN FIGHTS?</legend><label v-for="item in ['Burst damage','Sustained pressure','Damage over time & pressure','Control & disruption','Healing & support']" :key="item" :class="['advisor-option',{chosen:advisor.combat===item}]"><input v-model="advisor.combat" type="radio" name="combat" :value="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===7"><legend>HOW INDEPENDENT DO YOU WANT TO BE?</legend><label v-for="item in ['I want to handle things alone','I like playing with friends','I want to be needed by the group']" :key="item" :class="['advisor-option',{chosen:advisor.independence===item}]"><input v-model="advisor.independence" type="radio" name="independence" :value="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===8"><legend>WHAT SOUNDS MOST FUN?</legend><label v-for="item in ['Exploring and collecting','Battlegrounds and world PvP','Dungeons and group content','Making my character stronger']" :key="item" :class="['advisor-option',{chosen:advisor.social===item}]"><input v-model="advisor.social" type="radio" name="social" :value="item"><span>{{item}}</span></label></fieldset><fieldset v-if="advisorStep===9"><legend>HOW COMPLEX SHOULD YOUR CLASS BE?</legend><label v-for="item in ['Keep it straightforward','I want some depth','I want depth and many buttons']" :key="item" :class="['advisor-option',{chosen:advisor.complexity===item}]"><input v-model="advisor.complexity" type="radio" name="complexity" :value="item"><span>{{item}}</span></label></fieldset></div><div class="advisor-controls"><button v-if="advisorStep>0" class="ghost-button" type="button" @click="advisorBack">← BACK</button><button v-if="advisorStep<9" class="gold-button" type="button" @click="advisorNext">NEXT →</button><button v-else-if="advisorStep===9" class="gold-button" type="button" @click="advisorStep=10">SEE MY RESULT →</button><button v-else class="gold-button" type="button" @click="resetAdvisor">START OVER</button></div><article v-if="advisorComplete && advisorStep===10" class="advisor-result"><div class="kicker"><i></i> YOUR BEST MATCH</div><h3 v-if="advisor.faction && advisor.focus && advisor.role">{{advisorResult.race}} {{advisorResult.className}}</h3><h3 v-else>Answer the questions above</h3><div v-if="advisorComplete" class="advisor-recommendation"><div class="advisor-icons"><img :src="factionIcon(advisorResult.faction)" :alt="advisorResult.faction"><img :src="raceIcon(advisorResult.race)" :alt="advisorResult.race"><img :src="classIcon(advisorResult.className)" :alt="advisorResult.className"></div><strong>{{advisorResult.faction}} · {{advisorResult.className}} · {{advisorResult.score}}% MATCH</strong><p>{{advisorResult.reason}}</p><div class="advisor-alternatives"><small>ALTERNATIVES</small><span v-for="alternative in advisorResult.alternatives" :key="alternative.name">{{alternative.name}} · {{alternative.score}}%</span></div><div class="advisor-profs"><span v-for="prof in advisorResult.profs" :key="prof"><img :src="professionIcon(prof)" :alt="prof"><b>{{prof}}</b><small>{{professionBenefit(prof)}}</small></span><span><img :src="professionIcon('First Aid')" alt="First Aid"><b>First Aid</b><small>{{professionBenefit('First Aid')}}</small></span><span><img :src="professionIcon('Cooking')" alt="Cooking"><b>Cooking</b><small>{{professionBenefit('Cooking')}}</small></span><span><img :src="professionIcon('Fishing')" alt="Fishing"><b>Fishing</b><small>{{professionBenefit('Fishing')}}</small></span></div><small class="advisor-note">Engineering gives combat utility, Mining supports the profession path, while First Aid, Cooking and Fishing provide sustain, food and quality-of-life value while leveling.</small></div></article></section><section v-if="route==='overview'" class="resources"><div class="kicker"><i></i> FOREVER RESOURCES</div><h2>USEFUL LINKS FOR THE JOURNEY</h2><div class="resource-grid"><a class="resource-card" href="https://talentsforever.com/" target="_blank" rel="noreferrer"><span class="resource-icon">✦</span><span><strong>Talents Forever</strong><small>Plan your character build and talents.</small></span><b>↗</b></a><a class="resource-card" href="https://www.wowhead.com/forever/news" target="_blank" rel="noreferrer"><span class="resource-icon">✧</span><span><strong>Wowhead Forever News</strong><small>Latest news, updates and guides.</small></span><b>↗</b></a></div></section><section v-if="route==='overview'" class="hero"><div class="hero-copy"><div class="kicker"><i></i> THE CZECHDREAM GUILD</div><h1>ZBYTOČNÍ<br><em>SÚ SPÄŤ.</em></h1><p>A shared chronicle of every level, death, victory and ridiculous moment in Azeroth.</p><div class="hero-buttons"><button class="gold-button" @click="connected=!connected">{{connected?'BRIDGE CONNECTED':'CONNECT YOUR BRIDGE'}} <span>→</span></button><button class="ghost-button" @click="navigate('chronicle')">VIEW CHRONICLE</button></div></div><div class="hero-art"><div class="moon"></div><div class="mountain">⚔</div><div class="hero-tag"><strong>SEASON ONE</strong><span>THE JOURNEY BEGINS</span></div></div></section><section class="section-head"><div><div class="kicker">GUILD INTELLIGENCE</div><h2>{{title}}</h2></div><div class="live"><i></i>{{connected?'BRIDGE ONLINE':'AWAITING SYNC'}}</div></section><section v-if="route==='overview'" class="stats"><article><span class="stat-icon">♙</span><div><small>ACTIVE PLAYERS</small><strong>{{data.activePlayers}}</strong><label>from synced data</label></div></article><article><span class="stat-icon gold">♜</span><div><small>TOTAL LEVELS</small><strong>{{data.totalLevels}}</strong><label>across all characters</label></div></article><article><span class="stat-icon red">☠</span><div><small>DEATHS RECORDED</small><strong>{{data.deaths}}</strong><label>from synced events</label></div></article><article><span class="stat-icon purple">◈</span><div><small>TIME TOGETHER</small><strong>{{data.playedHours}}h</strong><label>from synced sessions</label></div></article></section><section v-if="route==='overview'||route==='crew'||route==='characters'" class="content-grid"><article class="panel wide"><div class="panel-title"><div><div class="kicker">THE PARTY</div><h3>{{route==='crew'?'CREW MEMBERS':'CHARACTER ROSTER'}}</h3></div></div><div class="roster-row header-row"><span>CHARACTER</span><span>CLASS</span><span>LEVEL</span><span>STATUS</span></div><div v-if="loading" class="empty-state">Loading guild data...</div><div v-else-if="!data.characters.length" class="empty-state">No characters synced yet. Connect a CzechDream Bridge.</div><div v-for="player in data.characters" v-else :key="player.name" class="roster-row"><div class="character"><span :class="['portrait',player.color]">{{player.name[0]}}</span><div><b>{{player.name}}</b><small>{{player.owner}}</small></div></div><span class="class-name">{{player.class}}</span><b class="level">{{player.level}}</b><span :class="['player-status',player.status]"><i></i>{{player.status}}</span></div></article><article v-if="route==='overview'" class="panel"><div class="panel-title"><div><div class="kicker">RECENT MOMENTS</div><h3>THE CHRONICLE</h3></div></div><div v-if="!data.events.length" class="empty-state">No events synced yet.</div><div v-else class="timeline"><div v-for="event in data.events.slice(0,5)" :key="event.title"><span class="event-icon death">✦</span><p><b>{{event.title}}</b><small>{{event.detail}}</small></p></div></div></article></section><section v-if="route==='chronicle'" class="panel chronicle-page"><div class="panel-title"><div><div class="kicker">ALL GUILD EVENTS</div><h3>THE CHRONICLE</h3></div></div><div v-if="!data.events.length" class="empty-state">No events synced yet. Your guild story will appear here.</div><div v-else class="timeline"><div v-for="event in data.events" :key="event.title"><span class="event-icon death">✦</span><p><b>{{event.title}}</b><small>{{event.detail}}</small></p></div></div></section></main><footer><span>© 2026 CZECHDREAM FOREVER</span><span>PUBLIC GUILD CHRONICLE · AZEROTH</span></footer></div></template>
+<template>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="mobile-menu" @click="menu = !menu">☰</button>
+      <div class="brand" @click="navigate('overview')">
+        <div class="brand-mark">✦</div>
+        <div><b>CZECHDREAM</b><span>FOREVER</span></div>
+      </div>
+      <nav :class="{ open: menu }">
+        <a
+          v-for="page in pages"
+          :key="page[0]"
+          :class="{ selected: route === page[0] }"
+          @click="navigate(page[0])"
+          >{{ page[1] }}</a
+        ><a class="advisor-nav-link" @click="navigate('advisor')"
+          >CLASS ADVISOR</a
+        ><a class="professions-nav-link" @click="navigate('professions')"
+          >PROFESSIONS</a
+        ><a class="races-nav-link" @click="navigate('racials')">RACES</a
+        ><a href="https://talentsforever.com/" target="_blank" rel="noreferrer"
+          >TALENTS</a
+        ><a
+          href="https://www.wowhead.com/forever/news"
+          target="_blank"
+          rel="noreferrer"
+          >NEWS</a
+        ><a
+          href="https://discord.gg/cmtnpW7jUU"
+          target="_blank"
+          rel="noreferrer"
+          >DISCORD</a
+        >
+      </nav>
+      <div class="resource-links">
+        <a href="https://talentsforever.com/" target="_blank" rel="noreferrer"
+          >TALENTS</a
+        ><a
+          href="https://www.wowhead.com/forever/news"
+          target="_blank"
+          rel="noreferrer"
+          >NEWS</a
+        ><a
+          href="https://discord.gg/cmtnpW7jUU"
+          target="_blank"
+          rel="noreferrer"
+          >DISCORD</a
+        >
+      </div>
+      <div class="top-actions">
+        <span class="public-badge">PUBLIC GUILD DASHBOARD</span>
+      </div>
+    </header>
+    <main>
+      <section v-if="route === 'overview'" class="launch-banner">
+        <div>
+          <div class="kicker"><i></i> WORLD OF WARCRAFT: FOREVER</div>
+          <h2>THE JOURNEY BEGINS</h2>
+          <p>Global launch · 5 November 2026 · 00:00 CET</p>
+        </div>
+        <div class="countdown">
+          <div>
+            <strong>{{ String(countdown.days).padStart(2, "0") }}</strong
+            ><small>DAYS</small>
+          </div>
+          <b>:</b>
+          <div>
+            <strong>{{ String(countdown.hours).padStart(2, "0") }}</strong
+            ><small>HOURS</small>
+          </div>
+          <b>:</b>
+          <div>
+            <strong>{{ String(countdown.minutes).padStart(2, "0") }}</strong
+            ><small>MIN</small>
+          </div>
+          <b>:</b>
+          <div>
+            <strong>{{ String(countdown.seconds).padStart(2, "0") }}</strong
+            ><small>SEC</small>
+          </div>
+        </div>
+      </section>
+      <section v-if="route === 'overview'" class="addon-download">
+        <div class="addon-visual">
+          <img src="/czechdream-lite.png" alt="CzechDream Lite addon icon" />
+          <span class="addon-version">v{{ addonVersion }}</span>
+        </div>
+        <div class="addon-copy">
+          <div class="kicker"><i></i> CZECHDREAM LITE</div>
+          <h2>LESS CLICKING. MORE AZEROTH.</h2>
+          <p>
+            A lightweight quality-of-life addon made for WoW Forever. It keeps
+            the useful chores automatic and stays out of your way.
+          </p>
+          <ul>
+            <li>Class-coloured unit frames</li>
+            <li>Smart quest accept &amp; turn-in</li>
+            <li>Auto repair &amp; grey-item selling</li>
+            <li>Optional combat error filter</li>
+          </ul>
+        </div>
+        <div class="addon-action">
+          <a
+            class="gold-button addon-download-button"
+            :href="addonDownload"
+            download
+          >
+            DOWNLOAD ADDON <span>↓</span>
+          </a>
+          <small>VERSION {{ addonVersion }} · WOW FOREVER</small>
+          <p>
+            Extract <b>CzechDreamForever</b> into<br />
+            <code>Interface/AddOns/</code>
+          </p>
+        </div>
+      </section>
+      <section v-if="route === 'overview'" class="crew-signup-area">
+        <div class="kicker"><i></i> CZECHDREAM CREW</div>
+        <h2>ZBYTOČNÍ ARE BACK!</h2>
+        <p>
+          Tell us what you are playing and what you want to focus on in Forever.
+        </p>
+        <div class="crew-list">
+          <div v-if="!crewMembers.length" class="empty-state">
+            Zatiaľ sa nepridal nikto. Buď prvý.
+          </div>
+          <div
+            v-for="member in crewMembers"
+            :key="member.name"
+            class="crew-member"
+          >
+            <span class="faction-badge"
+              ><img
+                v-if="factionIcon(member.faction)"
+                :src="factionIcon(member.faction)"
+                :alt="member.faction"
+                :title="member.faction"
+            /></span>
+            <div class="member-identity">
+              <strong>{{ member.name }}</strong
+              ><small>{{ member.roles || "No focus selected" }}</small>
+            </div>
+            <div class="member-classes">
+              <span
+                v-for="className in member.class.split(',')"
+                :key="className"
+                class="class-icon-wrap"
+                ><img
+                  v-if="classIcon(className)"
+                  :src="classIcon(className)"
+                  :alt="className.trim()"
+                  :title="className.trim()"
+                /><span class="class-tooltip">{{
+                  className.trim()
+                }}</span></span
+              >
+            </div>
+          </div>
+        </div>
+        <section class="coverage-board">
+          <div class="coverage-heading">
+            <div>
+              <div class="kicker">CREW COMPOSITION</div>
+              <h3>WHAT WE HAVE · WHAT WE NEED</h3>
+            </div>
+            <span>{{ crewMembers.length }} players locked in</span>
+          </div>
+          <div class="coverage-classes">
+            <div
+              v-for="className in allClasses"
+              :key="className"
+              :class="[
+                'coverage-class',
+                { missing: !selectedClasses.has(className) },
+              ]"
+            >
+              <span class="coverage-icon-wrap"
+                ><img :src="classIcon(className)" :alt="className" /><span
+                  class="class-tooltip"
+                  >{{ className }}</span
+                ></span
+              ><small>{{ className }}</small>
+            </div>
+          </div>
+          <div class="coverage-roles">
+            <div
+              v-for="role in allRoles"
+              :key="role"
+              :class="['coverage-role', { missing: !selectedRoles.has(role) }]"
+            >
+              <strong>{{ roleCounts[role] }}</strong
+              ><span>{{ role }}</span
+              ><small>{{
+                roleCounts[role] === 1 ? "player" : "players"
+              }}</small>
+            </div>
+          </div>
+        </section>
+        <button class="gold-button join-button" @click="openSignup">
+          JOIN THE CREW
+        </button>
+        <div v-if="showForm" class="form-modal">
+          <button type="button" class="form-close" @click="closeSignup">
+            ×</button
+          ><iframe
+            :src="signupUrl"
+            title="CzechDream Forever signup form"
+          ></iframe>
+        </div>
+        <form
+          v-if="false"
+          class="signup-form"
+          name="crew-signup"
+          .prevent="submitForm"
+        >
+          <div v-if="submitted" class="success">
+            Hotovo. Si zapísaný v CzechDream crew.
+          </div>
+          <template v-else
+            ><input
+              v-model="form.name"
+              name="name"
+              required
+              placeholder="Tvoje meno / nick"
+            />
+            <div class="faction-picker">
+              <button
+                type="button"
+                :class="{ chosen: form.faction === 'Horde' }"
+                @click="
+                  form.faction = 'Horde';
+                  form.race = '';
+                  form.class = '';
+                "
+              >
+                <img
+                  src="https://wow.zamimg.com/images/wow/icons/tiny/side_horde.gif"
+                  alt=""
+                />
+                HORDE</button
+              ><button
+                type="button"
+                :class="{ chosen: form.faction === 'Alliance' }"
+                @click="
+                  form.faction = 'Alliance';
+                  form.race = '';
+                  form.class = '';
+                "
+              >
+                <img
+                  src="https://wow.zamimg.com/images/wow/icons/tiny/side_alliance.gif"
+                  alt=""
+                />
+                ALLIANCE
+              </button>
+            </div>
+            <div class="choice-block">
+              <label>RASA</label>
+              <div class="choice-grid">
+                <button
+                  v-for="race in factionRaces"
+                  :key="race"
+                  type="button"
+                  :class="{ chosen: form.race === race }"
+                  @click="
+                    form.race = race;
+                    form.class = '';
+                  "
+                >
+                  {{ race }}
+                </button>
+              </div>
+            </div>
+            <div class="choice-block">
+              <label>CLASSA</label>
+              <div class="choice-grid">
+                <button
+                  v-for="className in availableClasses"
+                  :key="className"
+                  type="button"
+                  :class="{ chosen: form.class === className }"
+                  @click="form.class = className"
+                >
+                  {{ className }}
+                </button>
+              </div>
+            </div>
+            <input
+              v-model="form.character"
+              name="character"
+              required
+              placeholder="Meno postavy"
+            /><button
+              class="ghost-button add-character"
+              type="button"
+              @click="addCharacter"
+            >
+              + PRIDAŤ ĎALŠIU POSTAVU
+            </button>
+            <div v-if="form.characters.length" class="planned-characters">
+              <div v-for="(character, index) in form.characters" :key="index">
+                <strong>{{ character.character }}</strong
+                ><span>{{ character.race }} · {{ character.class }}</span
+                ><button type="button" @click="removeCharacter(index)">
+                  ×
+                </button>
+              </div>
+            </div>
+            <textarea
+              v-model="form.note"
+              name="note"
+              placeholder="Poznámka"
+            ></textarea
+            ><button class="gold-button" type="submit">
+              ZAPÍSAŤ MA →
+            </button></template
+          >
+        </form>
+      </section>
+      <section v-if="false" class="forever-facts">
+        <div class="kicker"><i></i> FOREVER FIELD NOTES</div>
+        <h2>SHORT READS FROM AZEROTH</h2>
+        <p class="facts-intro">
+          Useful notes for the journey. More topics will be added as Forever
+          gets closer.
+        </p>
+        <div class="facts-grid">
+          <article
+            v-for="note in fieldNotes"
+            :key="note.route"
+            class="fact-card"
+            @click="openFieldNote(note)"
+          >
+            <div class="fact-cover">
+              <img
+                :src="`https://wow.zamimg.com/images/wow/icons/medium/${note.icon}.jpg`"
+                :alt="note.title"
+              />
+            </div>
+            <div class="fact-content">
+              <small>{{ note.category }}</small
+              ><strong>{{ note.title }}</strong
+              ><span>{{ note.text }}</span
+              ><b>READ NOTES ↗</b>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section v-if="route === 'facts'" class="facts-page">
+        <button class="ghost-button facts-back" @click="navigate('overview')">
+          ← BACK TO OVERVIEW
+        </button>
+        <div class="article-kicker">
+          <span>FOREVER UPDATE</span><small>UPDATED 21 SEP 2026</small>
+        </div>
+        <h2>WORLD OF WARCRAFT: FOREVER OVERVIEW</h2>
+        <p class="article-lead">
+          A new evolution of WoW Classic. Start fresh at level 1, explore a
+          bigger Azeroth and build your legacy all the way to level 60.
+        </p>
+        <div class="article-meta">
+          <span>LAUNCH</span><strong>5 NOVEMBER 2026 · 00:00 CET</strong>
+        </div>
+        <div class="article-sections">
+          <article>
+            <img
+              src="https://wow.zamimg.com/images/wow/icons/medium/inv_misc_map_01.jpg"
+              alt="New zones"
+            />
+            <div>
+              <small>THE WORLD</small>
+              <h3>New zones and Skyborne</h3>
+              <p>
+                Forever adds Mount Hyjal, Shen'Dralas, Riverglades and Zephras
+                Isle. Skyborne can be played by both factions, with Shaman
+                available to Horde and Mage to Alliance.
+              </p>
+            </div>
+          </article>
+          <article>
+            <img
+              src="https://wow.zamimg.com/images/wow/icons/medium/inv_sword_07.jpg"
+              alt="Dungeons and raids"
+            />
+            <div>
+              <small>ENDGAME</small>
+              <h3>New dungeons and raids</h3>
+              <p>
+                Nine dungeons arrive at launch. The Barrow Deeps and Hyjal
+                Summit open on 9 December, alongside the return of Onyxia's
+                Lair.
+              </p>
+            </div>
+          </article>
+          <article>
+            <img
+              src="https://wow.zamimg.com/images/wow/icons/medium/trade_alchemy.jpg"
+              alt="Professions"
+            />
+            <div>
+              <small>PROFESSIONS</small>
+              <h3>Professions get meaningful bonuses</h3>
+              <p>
+                Professions add passive stats, utility and preparation tools.
+                Campsites also let players share profession-based buffs in the
+                open world.
+              </p>
+            </div>
+          </article>
+          <article>
+            <img
+              src="https://wow.zamimg.com/images/wow/icons/medium/ability_hunter_mendpet.jpg"
+              alt="Legacy system"
+            />
+            <div>
+              <small>PROGRESSION</small>
+              <h3>Legacy system and talents</h3>
+              <p>
+                Earn Legacy Points from exploring, leveling, tradeskills, PvP,
+                reputations, dungeons and raids. Spend them on account-wide
+                non-combat perks.
+              </p>
+            </div>
+          </article>
+          <article>
+            <img
+              src="https://wow.zamimg.com/images/wow/icons/medium/ability_warrior_bloodfrenzy.jpg"
+              alt="PvP"
+            />
+            <div>
+              <small>PVP</small>
+              <h3>Darkspear Islands</h3>
+              <p>
+                A new 15v15 battleground joins an updated seasonal PvP system.
+                Perfect for the CzechDream crew — we are going in mainly for
+                PvP.
+              </p>
+            </div>
+          </article>
+          <article>
+            <img
+              src="https://wow.zamimg.com/images/wow/icons/medium/inv_chest_cloth_17.jpg"
+              alt="Transmog"
+            />
+            <div>
+              <small>YOUR CHARACTER</small>
+              <h3>Class changes and optional transmog</h3>
+              <p>
+                New spells, talents, racials and class-race combinations arrive
+                alongside an optional transmog system that can be disabled.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section v-if="route === 'professions'" class="facts-page">
+        <button class="ghost-button facts-back" @click="navigate('overview')">
+          ← BACK TO FIELD NOTES
+        </button>
+        <div class="article-kicker">
+          <span>PROFESSION NOTES</span><small>UPDATED 21 SEP 2026</small>
+        </div>
+        <h2>PROFESSIONS IN FOREVER</h2>
+        <p class="article-lead">
+          A quick guide to the passive bonuses, stats and utility each
+          profession brings to your character.
+        </p>
+        <div class="profession-list">
+          <article
+            v-for="fact in foreverFacts"
+            :key="fact.name"
+            class="profession-card"
+          >
+            <img
+              :src="`https://wow.zamimg.com/images/wow/icons/medium/${fact.icon}.jpg`"
+              :alt="fact.name"
+            />
+            <div>
+              <small>PROFESSION</small>
+              <h3>{{ fact.name }}</h3>
+              <strong>{{ fact.bonus }}</strong>
+              <p>{{ fact.detail }}</p>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section v-if="route === 'article' && activeArticle" class="facts-page">
+        <button class="ghost-button facts-back" @click="navigate('overview')">
+          ← BACK TO FIELD NOTES
+        </button>
+        <div class="article-kicker">
+          <span>{{ activeArticle.category }}</span
+          ><small>UPDATED 21 SEP 2026</small>
+        </div>
+        <h2>{{ activeArticle.title }}</h2>
+        <p class="article-lead">{{ activeArticle.text }}</p>
+        <div class="article-feature">
+          <img
+            :src="`https://wow.zamimg.com/images/wow/icons/medium/${activeArticle.icon}.jpg`"
+            :alt="activeArticle.title"
+          />
+          <p>{{ activeArticle.body }}</p>
+        </div>
+      </section>
+      <section v-if="route === 'racials'" class="facts-page">
+        <button class="ghost-button facts-back" @click="navigate('overview')">
+          ← BACK TO FIELD NOTES
+        </button>
+        <div class="article-kicker">
+          <span>RACE NOTES</span><small>FROM TALENTS FOREVER</small>
+        </div>
+        <h2>RACIAL PASSIVES</h2>
+        <p class="article-lead">
+          A quick look at what each race brings to the table in Forever. Hover
+          an icon to see the passive name.
+        </p>
+        <div class="racial-columns">
+          <div
+            v-for="faction in racialFactionNames"
+            :key="faction"
+            class="racial-column"
+          >
+            <h3 :class="faction.toLowerCase()">{{ faction }}</h3>
+            <article
+              v-for="race in racialColumns[faction]"
+              :key="race.race"
+              class="racial-card"
+            >
+              <div class="racial-heading">
+                <img
+                  class="racial-portrait"
+                  :src="raceIcon(race.race)"
+                  :alt="race.race"
+                />
+                <div>
+                  <strong>{{ race.race }}</strong
+                  ><small>{{ race.faction }}</small>
+                </div>
+              </div>
+              <div class="racial-icons">
+                <span
+                  v-for="item in race.items"
+                  :key="item[0]"
+                  class="racial-icon"
+                  ><img
+                    :src="racialIcon(item[1])"
+                    :alt="item[0]"
+                    :title="item[0]"
+                  />
+                  <div>
+                    <strong>{{ item[0] }}</strong
+                    ><small>{{ racialDescription(item[0]) }}</small>
+                  </div></span
+                >
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+      <section v-if="route === 'advisor'" class="advisor-page">
+        <button class="ghost-button facts-back" @click="navigate('overview')">
+          ← BACK TO FIELD NOTES
+        </button>
+        <div class="article-kicker">
+          <span>CHARACTER BUILDER</span><small>CLASS ADVISOR</small>
+        </div>
+        <h2>FIND YOUR FOREVER MAIN</h2>
+        <p class="article-lead">
+          Answer the questions and get a recommendation built around how you
+          actually want to play.
+        </p>
+        <div class="advisor-progress">
+          <span
+            >STEP {{ advisorStep < 10 ? advisorStep + 1 : "RESULT" }} OF
+            10</span
+          >
+          <div>
+            <i
+              :style="{
+                width: `${(Math.min(advisorStep + 1, 10) / 10) * 100}%`,
+              }"
+            ></i>
+          </div>
+        </div>
+        <div class="advisor-form">
+          <fieldset v-if="advisorStep === 0">
+            <legend>WHICH FACTION?</legend>
+            <label
+              v-for="item in ['Horde', 'Alliance']"
+              :key="item"
+              :class="['advisor-option', { chosen: advisor.faction === item }]"
+              ><input
+                v-model="advisor.faction"
+                type="radio"
+                name="faction"
+                :value="item"
+              /><img :src="factionIcon(item)" :alt="item" /><span>{{
+                item
+              }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 1">
+            <legend>WHAT DO YOU WANT TO FOCUS ON?</legend>
+            <label
+              v-for="item in [
+                'PvP',
+                'PvE',
+                'Support & utility',
+                'Gold & gathering',
+              ]"
+              :key="item"
+              :class="['advisor-option', { chosen: advisor.focus === item }]"
+              ><input
+                v-model="advisor.focus"
+                type="radio"
+                name="focus"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 2">
+            <legend>WHAT ROLE SOUNDS BEST?</legend>
+            <label
+              v-for="item in ['Melee DPS', 'Ranged DPS', 'Healer', 'Tank']"
+              :key="item"
+              :class="['advisor-option', { chosen: advisor.role === item }]"
+              ><input
+                v-model="advisor.role"
+                type="radio"
+                name="role"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 3">
+            <legend>WHAT PLAYSTYLE DO YOU WANT?</legend>
+            <label
+              v-for="item in [
+                'Stealth & burst',
+                'Support & utility',
+                'Simple & durable',
+                'Mobile & ranged',
+                'Pet & solo play',
+                'Demons & dark magic',
+                'Totems & hybrid utility',
+                'Shapeshifting & flexibility',
+                'Heavy armour & protection',
+              ]"
+              :key="item"
+              :class="[
+                'advisor-option',
+                { chosen: advisor.playstyle === item },
+              ]"
+              ><input
+                v-model="advisor.playstyle"
+                type="radio"
+                name="playstyle"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 4">
+            <legend>WHAT MATTERS MOST?</legend>
+            <label
+              v-for="item in [
+                'Winning fights',
+                'Helping the crew',
+                'Making gold',
+                'Collecting useful bonuses',
+              ]"
+              :key="item"
+              :class="[
+                'advisor-option',
+                { chosen: advisor.priorities.includes(item) },
+              ]"
+              ><input
+                v-model="advisor.priorities"
+                type="checkbox"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 5">
+            <legend>HOW MUCH EXPERIENCE DO YOU HAVE?</legend>
+            <label
+              v-for="item in [
+                'New to WoW',
+                'Played Classic',
+                'Played many versions',
+              ]"
+              :key="item"
+              :class="[
+                'advisor-option',
+                { chosen: advisor.experience === item },
+              ]"
+              ><input
+                v-model="advisor.experience"
+                type="radio"
+                name="experience"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 6">
+            <legend>HOW DO YOU WANT TO WIN FIGHTS?</legend>
+            <label
+              v-for="item in [
+                'Burst damage',
+                'Sustained pressure',
+                'Damage over time & pressure',
+                'Control & disruption',
+                'Healing & support',
+              ]"
+              :key="item"
+              :class="['advisor-option', { chosen: advisor.combat === item }]"
+              ><input
+                v-model="advisor.combat"
+                type="radio"
+                name="combat"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 7">
+            <legend>HOW INDEPENDENT DO YOU WANT TO BE?</legend>
+            <label
+              v-for="item in [
+                'I want to handle things alone',
+                'I like playing with friends',
+                'I want to be needed by the group',
+              ]"
+              :key="item"
+              :class="[
+                'advisor-option',
+                { chosen: advisor.independence === item },
+              ]"
+              ><input
+                v-model="advisor.independence"
+                type="radio"
+                name="independence"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 8">
+            <legend>WHAT SOUNDS MOST FUN?</legend>
+            <label
+              v-for="item in [
+                'Exploring and collecting',
+                'Battlegrounds and world PvP',
+                'Dungeons and group content',
+                'Making my character stronger',
+              ]"
+              :key="item"
+              :class="['advisor-option', { chosen: advisor.social === item }]"
+              ><input
+                v-model="advisor.social"
+                type="radio"
+                name="social"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+          <fieldset v-if="advisorStep === 9">
+            <legend>HOW COMPLEX SHOULD YOUR CLASS BE?</legend>
+            <label
+              v-for="item in [
+                'Keep it straightforward',
+                'I want some depth',
+                'I want depth and many buttons',
+              ]"
+              :key="item"
+              :class="[
+                'advisor-option',
+                { chosen: advisor.complexity === item },
+              ]"
+              ><input
+                v-model="advisor.complexity"
+                type="radio"
+                name="complexity"
+                :value="item"
+              /><span>{{ item }}</span></label
+            >
+          </fieldset>
+        </div>
+        <div class="advisor-controls">
+          <button
+            v-if="advisorStep > 0"
+            class="ghost-button"
+            type="button"
+            @click="advisorBack"
+          >
+            ← BACK</button
+          ><button
+            v-if="advisorStep < 9"
+            class="gold-button"
+            type="button"
+            @click="advisorNext"
+          >
+            NEXT →</button
+          ><button
+            v-else-if="advisorStep === 9"
+            class="gold-button"
+            type="button"
+            @click="advisorStep = 10"
+          >
+            SEE MY RESULT →</button
+          ><button
+            v-else
+            class="gold-button"
+            type="button"
+            @click="resetAdvisor"
+          >
+            START OVER
+          </button>
+        </div>
+        <article
+          v-if="advisorComplete && advisorStep === 10"
+          class="advisor-result"
+        >
+          <div class="kicker"><i></i> YOUR BEST MATCH</div>
+          <h3 v-if="advisor.faction && advisor.focus && advisor.role">
+            {{ advisorResult.race }} {{ advisorResult.className }}
+          </h3>
+          <h3 v-else>Answer the questions above</h3>
+          <div v-if="advisorComplete" class="advisor-recommendation">
+            <div class="advisor-icons">
+              <img
+                :src="factionIcon(advisorResult.faction)"
+                :alt="advisorResult.faction"
+              /><img
+                :src="raceIcon(advisorResult.race)"
+                :alt="advisorResult.race"
+              /><img
+                :src="classIcon(advisorResult.className)"
+                :alt="advisorResult.className"
+              />
+            </div>
+            <strong
+              >{{ advisorResult.faction }} · {{ advisorResult.className }} ·
+              {{ advisorResult.score }}% MATCH</strong
+            >
+            <p>{{ advisorResult.reason }}</p>
+            <div class="advisor-alternatives">
+              <small>ALTERNATIVES</small
+              ><span
+                v-for="alternative in advisorResult.alternatives"
+                :key="alternative.name"
+                >{{ alternative.name }} · {{ alternative.score }}%</span
+              >
+            </div>
+            <div class="advisor-profs">
+              <span v-for="prof in advisorResult.profs" :key="prof"
+                ><img :src="professionIcon(prof)" :alt="prof" /><b>{{ prof }}</b
+                ><small>{{ professionBenefit(prof) }}</small></span
+              ><span
+                ><img :src="professionIcon('First Aid')" alt="First Aid" /><b
+                  >First Aid</b
+                ><small>{{ professionBenefit("First Aid") }}</small></span
+              ><span
+                ><img :src="professionIcon('Cooking')" alt="Cooking" /><b
+                  >Cooking</b
+                ><small>{{ professionBenefit("Cooking") }}</small></span
+              ><span
+                ><img :src="professionIcon('Fishing')" alt="Fishing" /><b
+                  >Fishing</b
+                ><small>{{ professionBenefit("Fishing") }}</small></span
+              >
+            </div>
+            <small class="advisor-note"
+              >Engineering gives combat utility, Mining supports the profession
+              path, while First Aid, Cooking and Fishing provide sustain, food
+              and quality-of-life value while leveling.</small
+            >
+          </div>
+        </article>
+      </section>
+      <section v-if="route === 'overview'" class="resources">
+        <div class="kicker"><i></i> FOREVER RESOURCES</div>
+        <h2>USEFUL LINKS FOR THE JOURNEY</h2>
+        <div class="resource-grid">
+          <a
+            class="resource-card"
+            href="https://talentsforever.com/"
+            target="_blank"
+            rel="noreferrer"
+            ><span class="resource-icon">✦</span
+            ><span
+              ><strong>Talents Forever</strong
+              ><small>Plan your character build and talents.</small></span
+            ><b>↗</b></a
+          ><a
+            class="resource-card"
+            href="https://www.wowhead.com/forever/news"
+            target="_blank"
+            rel="noreferrer"
+            ><span class="resource-icon">✧</span
+            ><span
+              ><strong>Wowhead Forever News</strong
+              ><small>Latest news, updates and guides.</small></span
+            ><b>↗</b></a
+          >
+        </div>
+      </section>
+      <section v-if="route === 'overview'" class="hero">
+        <div class="hero-copy">
+          <div class="kicker"><i></i> THE CZECHDREAM GUILD</div>
+          <h1>ZBYTOČNÍ<br /><em>SÚ SPÄŤ.</em></h1>
+          <p>
+            A shared chronicle of every level, death, victory and ridiculous
+            moment in Azeroth.
+          </p>
+          <div class="hero-buttons">
+            <button class="gold-button" @click="connected = !connected">
+              {{ connected ? "BRIDGE CONNECTED" : "CONNECT YOUR BRIDGE" }}
+              <span>→</span></button
+            ><button class="ghost-button" @click="navigate('chronicle')">
+              VIEW CHRONICLE
+            </button>
+          </div>
+        </div>
+        <div class="hero-art">
+          <div class="moon"></div>
+          <div class="mountain">⚔</div>
+          <div class="hero-tag">
+            <strong>SEASON ONE</strong><span>THE JOURNEY BEGINS</span>
+          </div>
+        </div>
+      </section>
+      <section class="section-head">
+        <div>
+          <div class="kicker">GUILD INTELLIGENCE</div>
+          <h2>{{ title }}</h2>
+        </div>
+        <div class="live">
+          <i></i>{{ connected ? "BRIDGE ONLINE" : "AWAITING SYNC" }}
+        </div>
+      </section>
+      <section v-if="route === 'overview'" class="stats">
+        <article>
+          <span class="stat-icon">♙</span>
+          <div>
+            <small>ACTIVE PLAYERS</small
+            ><strong>{{ data.activePlayers }}</strong
+            ><label>from synced data</label>
+          </div>
+        </article>
+        <article>
+          <span class="stat-icon gold">♜</span>
+          <div>
+            <small>TOTAL LEVELS</small><strong>{{ data.totalLevels }}</strong
+            ><label>across all characters</label>
+          </div>
+        </article>
+        <article>
+          <span class="stat-icon red">☠</span>
+          <div>
+            <small>DEATHS RECORDED</small><strong>{{ data.deaths }}</strong
+            ><label>from synced events</label>
+          </div>
+        </article>
+        <article>
+          <span class="stat-icon purple">◈</span>
+          <div>
+            <small>TIME TOGETHER</small><strong>{{ data.playedHours }}h</strong
+            ><label>from synced sessions</label>
+          </div>
+        </article>
+      </section>
+      <section
+        v-if="
+          route === 'overview' || route === 'crew' || route === 'characters'
+        "
+        class="content-grid"
+      >
+        <article class="panel wide">
+          <div class="panel-title">
+            <div>
+              <div class="kicker">THE PARTY</div>
+              <h3>
+                {{ route === "crew" ? "CREW MEMBERS" : "CHARACTER ROSTER" }}
+              </h3>
+            </div>
+          </div>
+          <div class="roster-row header-row">
+            <span>CHARACTER</span><span>CLASS</span><span>LEVEL</span
+            ><span>STATUS</span>
+          </div>
+          <div v-if="loading" class="empty-state">Loading guild data...</div>
+          <div v-else-if="!data.characters.length" class="empty-state">
+            No characters synced yet. Connect a CzechDream Bridge.
+          </div>
+          <div
+            v-for="player in data.characters"
+            v-else
+            :key="player.name"
+            class="roster-row"
+          >
+            <div class="character">
+              <span :class="['portrait', player.color]">{{
+                player.name[0]
+              }}</span>
+              <div>
+                <b>{{ player.name }}</b
+                ><small>{{ player.owner }}</small>
+              </div>
+            </div>
+            <span class="class-name">{{ player.class }}</span
+            ><b class="level">{{ player.level }}</b
+            ><span :class="['player-status', player.status]"
+              ><i></i>{{ player.status }}</span
+            >
+          </div>
+        </article>
+        <article v-if="route === 'overview'" class="panel">
+          <div class="panel-title">
+            <div>
+              <div class="kicker">RECENT MOMENTS</div>
+              <h3>THE CHRONICLE</h3>
+            </div>
+          </div>
+          <div v-if="!data.events.length" class="empty-state">
+            No events synced yet.
+          </div>
+          <div v-else class="timeline">
+            <div v-for="event in data.events.slice(0, 5)" :key="event.title">
+              <span class="event-icon death">✦</span>
+              <p>
+                <b>{{ event.title }}</b
+                ><small>{{ event.detail }}</small>
+              </p>
+            </div>
+          </div>
+        </article>
+      </section>
+      <section v-if="route === 'chronicle'" class="panel chronicle-page">
+        <div class="panel-title">
+          <div>
+            <div class="kicker">ALL GUILD EVENTS</div>
+            <h3>THE CHRONICLE</h3>
+          </div>
+        </div>
+        <div v-if="!data.events.length" class="empty-state">
+          No events synced yet. Your guild story will appear here.
+        </div>
+        <div v-else class="timeline">
+          <div v-for="event in data.events" :key="event.title">
+            <span class="event-icon death">✦</span>
+            <p>
+              <b>{{ event.title }}</b
+              ><small>{{ event.detail }}</small>
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <span>© 2026 CZECHDREAM FOREVER</span
+      ><span>PUBLIC GUILD CHRONICLE · AZEROTH</span>
+    </footer>
+  </div>
+</template>
