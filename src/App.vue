@@ -42,7 +42,8 @@ const crewMembers =
 const sheetCsv =
   "https://docs.google.com/spreadsheets/d/1SZIHizrbutMwKg25SF9vGVLSEMo_NIogMF4ZiJ20NcY/export?format=csv&gid=186545892";
 const addonVersion = "0.4.2";
-const addonDownload = `/downloads/CzechDream-Lite-v${addonVersion}.zip`;
+const addonCurseForgeUrl =
+  "https://www.curseforge.com/wow/addons/czechdream-lite";
 const classIcons: Record<string, string> = {
   Druid: "class_druid",
   Hunter: "class_hunter",
@@ -1036,15 +1037,16 @@ setInterval(() => (now.value = Date.now()), 1000);
         <div class="addon-action">
           <a
             class="gold-button addon-download-button"
-            :href="addonDownload"
-            download
+            :href="addonCurseForgeUrl"
+            target="_blank"
+            rel="noopener noreferrer"
           >
-            DOWNLOAD ADDON <span>↓</span>
+            VIEW ON CURSEFORGE <span>↗</span>
           </a>
           <small>VERSION {{ addonVersion }} · WOW FOREVER</small>
           <p>
-            Extract <b>CzechDreamForever</b> into<br />
-            <code>Interface/AddOns/</code>
+            Download, install and receive updates<br />
+            directly through <b>CurseForge</b>.
           </p>
         </div>
       </section>
