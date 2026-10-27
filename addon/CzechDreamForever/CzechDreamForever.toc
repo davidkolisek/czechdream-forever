@@ -3,7 +3,7 @@
 ## Title: CzechDream Lite
 ## Notes: Lightweight quality-of-life utilities for WoW Forever
 ## Author: CzechDream
-## Version: 0.4.2
+## Version: 0.5.0
 ## SavedVariables: CzechDreamLiteDB
 Core.lua
 Storage.lua
@@ -11,5 +11,6 @@ UnitFrames.lua
 QuestAutomation.lua
 Vendor.lua
 ErrorFilter.lua
+BreakReminder.lua
 UI.lua
 Commands.lua

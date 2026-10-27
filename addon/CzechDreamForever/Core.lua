@@ -5,7 +5,7 @@ CzechDreamForever = addon
 addon.name = 'CzechDreamLite'
 addon.folderName = folderName
 addon.displayName = 'CzechDream Lite'
-addon.version = '0.4.2'
+addon.version = '0.5.0'
 addon.prefix = 'CDL'
 addon.eventFrame = CreateFrame('Frame')
 
@@ -39,5 +39,15 @@ function addon:SetSetting(key, value)
     self:RefreshVendorAutomation()
   elseif (key == 'errorFilter' or key:find('^filter')) and self.RefreshErrorFilter then
     self:RefreshErrorFilter()
+  elseif key == 'breakReminder' and self.RefreshBreakReminder then
+    self:RefreshBreakReminder()
   end
+end
+
+function addon:SetBreakReminderMinutes(minutes)
+  if not self.db then return end
+  if minutes ~= 30 and minutes ~= 60 and minutes ~= 90 then return end
+  self.db.settings.breakReminderMinutes = minutes
+  self:SaveDB()
+  if self.RefreshBreakReminder then self:RefreshBreakReminder() end
 end

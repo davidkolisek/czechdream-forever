@@ -6,6 +6,7 @@ local activePage = 'frames'
 local pages = {}
 local tabs = {}
 local controls = {}
+local intervalButtons = {}
 
 local MINIMAP_ICON = 'Interface\\AddOns\\CzechDreamForever\\Media\\CzechDreamLite'
 
@@ -197,6 +198,28 @@ local function makeToggle(page, key, title, description, y)
   return row
 end
 
+local function makeIntervalButton(page, minutes, x)
+  local button = CreateFrame('Button', nil, page.body, 'BackdropTemplate')
+  button:SetSize(150, 48)
+  button:SetPoint('TOPLEFT', x, -112)
+  button:SetBackdrop({
+    bgFile = 'Interface\\Buttons\\WHITE8X8',
+    edgeFile = 'Interface\\Tooltips\\UI-Tooltip-Border',
+    edgeSize = 6,
+    insets = { left = 2, right = 2, top = 2, bottom = 2 }
+  })
+  button.minutes = minutes
+  button.label = font(button, WHITE .. minutes .. ' MIN', 0, -16, 11, 'GameFontNormal')
+  button.label:SetWidth(150)
+  button.label:SetJustifyH('CENTER')
+  button:SetScript('OnClick', function()
+    addon:SetBreakReminderMinutes(minutes)
+    addon:RefreshOptions()
+  end)
+  intervalButtons[#intervalButtons + 1] = button
+  return button
+end
+
 function addon:SelectPage(key)
   if not pages[key] then return end
   activePage = key
@@ -219,6 +242,13 @@ function addon:RefreshOptions()
     control:SetBackdropBorderColor(enabled and 0.68 or 0.22, enabled and 0.47 or 0.2, enabled and 0.16 or 0.13, 1)
   end
   for key, tab in pairs(tabs) do styleTab(tab, key == activePage) end
+  local selectedMinutes = self.db and self.db.settings.breakReminderMinutes or 60
+  for _, button in ipairs(intervalButtons) do
+    local selected = button.minutes == selectedMinutes
+    button:SetBackdropColor(selected and 0.22 or 0.075, selected and 0.17 or 0.085, selected and 0.1 or 0.11, 1)
+    button:SetBackdropBorderColor(selected and 0.78 or 0.24, selected and 0.54 or 0.25, selected and 0.18 or 0.16, 1)
+    button.label:SetText((selected and GOLD or GREY) .. button.minutes .. ' MIN')
+  end
   if minimapButton then
     if self.db.minimap.hide then minimapButton:Hide() else minimapButton:Show() end
     applyMinimapPosition()
@@ -263,6 +293,7 @@ function addon:BuildUI()
   makeTab('quests', 'Quests', 'Interface\\Icons\\INV_Misc_Book_09', -114)
   makeTab('vendors', 'Vendors', 'Interface\\Icons\\INV_Misc_Coin_01', -166)
   makeTab('messages', 'Messages', 'Interface\\Icons\\Spell_Shadow_MindRot', -218)
+  makeTab('breaks', 'Dad Break', 'Interface\\Icons\\INV_Drink_18', -270)
   font(optionsFrame.nav, MUTED .. 'Click the minimap icon', 16, -425, 9)
   font(optionsFrame.nav, MUTED .. 'again to close this panel.', 16, -443, 9)
 
@@ -285,6 +316,13 @@ function addon:BuildUI()
   makeToggle(messages, 'filterCooldownErrors', 'Cooldown errors', 'Ability or item is not ready yet.', -208)
   makeToggle(messages, 'filterRangeErrors', 'Range errors', 'Out of range or bad attack position.', -276)
   makeToggle(messages, 'filterInventoryErrors', 'Inventory errors', 'Full bags and item-related errors.', -344)
+
+  local breaks = makePage('breaks', 'DAD BREAK', 'A simple reminder to stand up, stretch and drink some water.')
+  makeToggle(breaks, 'breakReminder', 'Dad Break Reminder', 'Show one clear reminder after the selected play interval.', -4)
+  font(breaks.body, GOLD .. 'REMIND ME EVERY', 0, -88, 10, 'GameFontNormal')
+  makeIntervalButton(breaks, 30, 0)
+  makeIntervalButton(breaks, 60, 175)
+  makeIntervalButton(breaks, 90, 350)
 
   self:SelectPage('frames')
 end

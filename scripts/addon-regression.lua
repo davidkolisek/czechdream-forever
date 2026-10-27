@@ -10,7 +10,7 @@ end
 
 local function world(options)
   options = options or {}
-  local w = { frames = {}, timers = {}, time = 0, messages = {}, sales = {}, bags = {}, prices = {},
+  local w = { frames = {}, timers = {}, time = 0, messages = {}, notices = {}, sounds = {}, sales = {}, bags = {}, prices = {},
     shown = false, combat = false, money = 0, repairs = 0, repairCost = 0, units = {
       player = 'WARRIOR', target = 'WARLOCK', focus = 'PRIEST', party1 = 'MAGE'
     } }
@@ -81,6 +81,11 @@ local function world(options)
   e.GetTime = function() return w.time end
   e.InCombatLockdown = function() return w.combat end
   e.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) w.messages[#w.messages + 1] = message end }
+  e.RaidWarningFrame = {}
+  e.ChatTypeInfo = { RAID_WARNING = {} }
+  e.RaidNotice_AddMessage = function(_, message) w.notices[#w.notices + 1] = message end
+  e.SOUNDKIT = { READY_CHECK = 1 }
+  e.PlaySound = function(sound) w.sounds[#w.sounds + 1] = sound end
   e.MerchantFrame = { IsShown = function() return w.shown end }
   e.CanMerchantRepair = function() return w.repairCost > 0 end
   e.GetRepairAllCost = function() return w.repairCost, w.repairCost > 0 end
@@ -185,6 +190,7 @@ local function world(options)
   w:load('UnitFrames.lua')
   if options.ui then w:load('QuestAutomation.lua') end
   w:load('Vendor.lua')
+  w:load('BreakReminder.lua')
   if options.ui then
     w:load('ErrorFilter.lua')
     w:load('UI.lua')
@@ -433,6 +439,21 @@ test('actual UI checkbox sells at open vendor and stays checked after reopening/
   equal(reloaded:control('autoSellJunk').box.mark.shown, true)
   reloaded.env.SlashCmdList.CZECHDREAMLITE('debug')
   assert(table.concat(reloaded.messages):find('saved settings linked=true', 1, true))
+end)
+
+test('Dad Break reminder uses the selected interval without spamming', function()
+  local w = ready({ ui = true })
+  w.addon:SetSetting('breakReminder', true)
+  w.addon:SetBreakReminderMinutes(30)
+  w:advance(1799)
+  equal(#w.notices, 0)
+  w:advance(1.1)
+  equal(#w.notices, 1)
+  equal(#w.sounds, 1)
+  w:advance(60)
+  equal(#w.notices, 1)
+  w:advance(1740)
+  equal(#w.notices, 2)
 end)
 
 print(string.format('%d/%d passed', count - failures, count))

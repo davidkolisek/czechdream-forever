@@ -14,7 +14,9 @@ local function defaults()
       filterResourceErrors = true,
       filterCooldownErrors = true,
       filterRangeErrors = true,
-      filterInventoryErrors = false
+      filterInventoryErrors = false,
+      breakReminder = false,
+      breakReminderMinutes = 60
     },
     minimap = {
       hide = false,

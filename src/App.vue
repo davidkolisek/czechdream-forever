@@ -41,7 +41,7 @@ const crewMembers =
   >(crew);
 const sheetCsv =
   "https://docs.google.com/spreadsheets/d/1SZIHizrbutMwKg25SF9vGVLSEMo_NIogMF4ZiJ20NcY/export?format=csv&gid=186545892";
-const addonVersion = "0.4.2";
+const addonVersion = "0.5.0";
 const addonCurseForgeUrl =
   "https://www.curseforge.com/wow/addons/czechdream-lite";
 const classIcons: Record<string, string> = {
